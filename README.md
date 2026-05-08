@@ -134,6 +134,7 @@ hood, talks to it via SOCKS5 (client side) or the hidden-service API
 | Env vars, CLI, paths, diagnostic | [docs/configuration.md](docs/configuration.md) |
 | Architecture, design choices, pitfalls | [docs/internals.md](docs/internals.md) |
 | Examples (client / server / hybrid) | [examples/](examples/) |
+| Release history & versioning policy | [CHANGELOG.md](CHANGELOG.md) |
 
 ## 🧪 Try it
 
@@ -165,8 +166,10 @@ Required before tagging `1.0.0`:
       `sha256sums-signed-build.txt`. Unknown versions are refused unless
       the caller passes an explicit `sha256=...`. Mismatched archives are
       deleted before extraction.
-- [ ] **`CHANGELOG.md` + written SemVer policy.** What counts as a
-      breaking change, deprecation window, etc.
+- [x] **`CHANGELOG.md` + written SemVer policy.** See
+      [CHANGELOG.md](CHANGELOG.md) — Keep-a-Changelog format, with an
+      explicit policy at the top stating what counts as MAJOR / MINOR
+      / PATCH and the deprecation window.
 - [ ] **Publish `1.0.0` to PyPI.** Reserve the `tornion` name, set up
       a trusted-publisher GitHub Actions workflow (no API token in
       secrets), and tag the first stable release.
