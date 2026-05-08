@@ -62,6 +62,8 @@ tornion = "tornion.cli:main"
 Homepage = "https://github.com/LouisCourrian/tornion"
 Issues = "https://github.com/LouisCourrian/tornion/issues"
 Repository = "https://github.com/LouisCourrian/tornion"
+Changelog = "https://github.com/LouisCourrian/tornion/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/LouisCourrian/tornion/tree/main/docs"
 
 [tool.hatch.version]
 path = "src/tornion/_version.py"
@@ -74,7 +76,9 @@ include = [
     "/src/tornion",
     "/examples",
     "/tests",
+    "/docs",
     "/README.md",
+    "/CHANGELOG.md",
     "/LICENSE",
 ]
 
