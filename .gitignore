@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+build/
+dist/
+*.whl
+*.tar.gz
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local Claude Code state
+.claude/
+
+# Tor hidden service private keys — NEVER commit these.
+# Match anywhere in the tree (sample onion-key/ dirs from the docs, etc.)
+hs_ed25519_*
+hostname
+onion-key/

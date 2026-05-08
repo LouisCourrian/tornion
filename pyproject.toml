@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tornion"
+dynamic = ["version"]
+description = "Drop-in client + zero-config server for Tor hidden services"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Louis COURRIAN", email = "louis.courrian@gmail.com" },
+]
+keywords = ["tor", "onion", "hidden-services", "requests", "fastapi", "asgi", "wsgi", "privacy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Security",
+]
+
+# Core deps = client only. Server side is opt-in.
+dependencies = [
+    "requests[socks]>=2.32.0",
+    "stem>=1.8.2,<2.0",
+]
+
+[project.optional-dependencies]
+# Server features (uvicorn for ASGI, asgiref for auto-WSGI wrapping)
+server = [
+    "uvicorn[standard]>=0.30.0",
+    "asgiref>=3.7.0",
+]
+# Convenience: everything
+all = [
+    "uvicorn[standard]>=0.30.0",
+    "asgiref>=3.7.0",
+]
+# Development
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+    "build>=1.0",
+    "uvicorn[standard]>=0.30.0",
+    "asgiref>=3.7.0",
+]
+
+[project.scripts]
+tornion = "tornion.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/LouisCourrian/tornion"
+Issues = "https://github.com/LouisCourrian/tornion/issues"
+Repository = "https://github.com/LouisCourrian/tornion"
+
+[tool.hatch.version]
+path = "src/tornion/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tornion"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/tornion",
+    "/examples",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not integration'"
+markers = [
+    "integration: end-to-end tests that spawn a real tor process and use the network (slow; opt-in via `pytest -m integration`)",
+]
