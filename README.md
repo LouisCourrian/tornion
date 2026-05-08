@@ -160,9 +160,11 @@ Required before tagging `1.0.0`:
       basename (`python myserver.py` → `myserver`); `serve()` prints the
       resolved `key_dir` and a fresh-vs-existing identity status before
       tor bootstrap so the first run is never silent.
-- [ ] **Verify Tor Expert Bundle downloads.** Either pin SHA-256 hashes
-      per version or check the Tor Project's GPG signature before
-      executing the binary.
+- [x] **Verify Tor Expert Bundle downloads.** SHA-256 pinning. Hashes
+      live in `KNOWN_TOR_HASHES`, populated from the Tor Project's signed
+      `sha256sums-signed-build.txt`. Unknown versions are refused unless
+      the caller passes an explicit `sha256=...`. Mismatched archives are
+      deleted before extraction.
 - [ ] **`CHANGELOG.md` + written SemVer policy.** What counts as a
       breaking change, deprecation window, etc.
 - [ ] **Publish `1.0.0` to PyPI.** Reserve the `tornion` name, set up

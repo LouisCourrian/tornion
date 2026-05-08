@@ -14,7 +14,11 @@ from .exceptions import OnionError
 
 def _cmd_install_tor(args: argparse.Namespace) -> int:
     try:
-        path = _binary.install_tor(version=args.version, force=args.force)
+        path = _binary.install_tor(
+            version=args.version,
+            force=args.force,
+            sha256=args.sha256,
+        )
         print(f"\n✅ tor installed at: {path}")
         return 0
     except OnionError as e:
@@ -145,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
     p_install = sub.add_parser("install-tor", help="Download tor into the user cache")
     p_install.add_argument("--version", default=_binary.DEFAULT_TOR_VERSION)
     p_install.add_argument("--force", action="store_true")
+    p_install.add_argument(
+        "--sha256",
+        help="Override the pinned SHA-256. Use only if you've verified the "
+             "value against torproject.org's signed sha256sums-signed-build.txt.",
+    )
     p_install.set_defaults(func=_cmd_install_tor)
 
     p_get = sub.add_parser("get", help="Make a single HTTP request to a .onion URL")

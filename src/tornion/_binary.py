@@ -9,6 +9,7 @@ Resolution priority when looking for a usable tor binary:
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -17,7 +18,7 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from .exceptions import TorBinaryNotFound
 
@@ -27,6 +28,38 @@ from .exceptions import TorBinaryNotFound
 DEFAULT_TOR_VERSION = "15.0.11"
 
 TOR_DOWNLOAD_BASE = "https://archive.torproject.org/tor-package-archive/torbrowser"
+
+#: Pinned SHA-256 hashes for ``tor-expert-bundle-{suffix}-{version}.tar.gz``.
+#: Hashes are verified against the Tor Project's signed checksums file
+#: (``sha256sums-signed-build.txt``) at the time a version is added here.
+#: Once frozen in source, they protect against HTTPS compromise: even if the
+#: archive at torproject.org is replaced, the bytes won't match what's pinned.
+#:
+#: Bumping ``DEFAULT_TOR_VERSION`` requires adding the corresponding entry.
+KNOWN_TOR_HASHES: Dict[str, Dict[str, str]] = {
+    "15.0.11": {
+        "linux-i686":     "983c02597becc14aed304d001099496a4c5812ac02f8322194fce7a8013a5eb0",
+        "linux-x86_64":   "ff2992e410181aa1e21339a226bfb67fc37f919ff30a63075fa69a691b05a339",
+        "macos-aarch64":  "21abf38f0e0d6803c5171db61ba92de3ebd0cb40621e43a128de3c5a49eb0d9b",
+        "macos-x86_64":   "85b26ddd5a2e4e7b04e33c7551076c64710c90c78499d973cf2fc3b4f339ba4d",
+        "windows-i686":   "c4bc9345655913fed71e05d4a9f7d599cfab65bb6adfd6df55dde9f3e887153b",
+        "windows-x86_64": "65e7b0916d75faefc5e385fe894aea49d1b7f961759df0c8aaf211c905bbb42b",
+    },
+}
+
+
+def _expected_hash(version: str, suffix: str) -> Optional[str]:
+    """Return the pinned SHA-256 for a (version, platform), or None if unknown."""
+    return KNOWN_TOR_HASHES.get(version, {}).get(suffix)
+
+
+def _hash_file(path: Path, *, chunk_size: int = 1 << 20) -> str:
+    """Stream a file through SHA-256 and return the hex digest."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def cache_dir() -> Path:
@@ -160,8 +193,26 @@ def install_tor(
     version: str = DEFAULT_TOR_VERSION,
     force: bool = False,
     progress: bool = True,
+    sha256: Optional[str] = None,
 ) -> Path:
-    """Download and extract the Tor Expert Bundle into the user cache."""
+    """Download, verify, and extract the Tor Expert Bundle into the user cache.
+
+    The downloaded archive is checked against a pinned SHA-256 before
+    extraction. Hashes for known versions live in ``KNOWN_TOR_HASHES``.
+
+    Args:
+        version: Bundle version, e.g. "15.0.11".
+        force: Re-download even if a tor binary is already cached.
+        progress: Print a progress bar and status lines to stdout.
+        sha256: Override the pinned hash (use when installing a version not
+            yet known to this tornion release, after manually verifying it
+            against the Tor Project's signed sha256sums file).
+
+    Raises:
+        TorBinaryNotFound: if the version is not pinned and no explicit
+            ``sha256`` is provided, if the download fails, or if the
+            archive's actual hash does not match the expected value.
+    """
     if progress:
         # Make sure emoji-bearing prints below don't crash on cp1252 (Windows).
         from ._console import setup_console_encoding
@@ -176,6 +227,24 @@ def install_tor(
     suffix = _detect_platform_suffix()
     archive_name = f"tor-expert-bundle-{suffix}-{version}.tar.gz"
     url = f"{TOR_DOWNLOAD_BASE}/{version}/{archive_name}"
+
+    # Resolve expected hash up front so we fail fast on unknown versions
+    # without spending bandwidth on a download we'd refuse to extract.
+    expected_hash = sha256 if sha256 is not None else _expected_hash(version, suffix)
+    skip_check = os.environ.get("TORNION_INSECURE_SKIP_HASH_CHECK") == "1"
+
+    if expected_hash is None and not skip_check:
+        raise TorBinaryNotFound(
+            f"No SHA-256 hash on file for {archive_name}.\n"
+            f"This is a security check — tornion only installs Tor Expert\n"
+            f"Bundle versions whose contents have been verified at release\n"
+            f"time. To proceed:\n"
+            f"  - Use a supported version: {sorted(KNOWN_TOR_HASHES)}\n"
+            f"  - OR pass `sha256='...'` to install_tor() (verify it yourself\n"
+            f"    against {TOR_DOWNLOAD_BASE}/{version}/sha256sums-signed-build.txt)\n"
+            f"  - OR set TORNION_INSECURE_SKIP_HASH_CHECK=1 (NOT recommended;\n"
+            f"    the binary will only be authenticated by HTTPS)"
+        )
 
     if progress:
         print(f"⬇  tornion: downloading Tor Expert Bundle {version} ({suffix})")
@@ -195,6 +264,25 @@ def install_tor(
                 f"Verify version {version} exists at "
                 f"https://www.torproject.org/download/tor/"
             ) from e
+
+        if expected_hash is not None:
+            actual = _hash_file(tmp_path)
+            if actual != expected_hash:
+                tmp_path.unlink(missing_ok=True)
+                raise TorBinaryNotFound(
+                    f"SHA-256 mismatch for {url}\n"
+                    f"  expected: {expected_hash}\n"
+                    f"  actual:   {actual}\n"
+                    f"\n"
+                    f"This usually means: HTTPS interception, a corrupted or\n"
+                    f"partial download, or tornion shipping a stale hash for\n"
+                    f"a re-released version. The downloaded archive has been\n"
+                    f"deleted; re-run to retry."
+                )
+            if progress:
+                print(f"   sha256 ok ({actual[:16]}…)")
+        elif progress:
+            print(f"   ⚠ sha256 NOT verified (TORNION_INSECURE_SKIP_HASH_CHECK=1)")
 
         if target_dir.exists():
             shutil.rmtree(target_dir)

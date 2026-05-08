@@ -78,3 +78,100 @@ def test_detect_running_tor_via_env(monkeypatch):
     monkeypatch.setattr(_tor, "_probe_socks5",
                         lambda host, port, timeout=0.3: port == 9999)
     assert _tor.detect_running_tor() == 9999
+
+
+# ---------- Tor binary download verification (SHA-256 pinning) ----------
+
+def test_known_tor_hashes_well_formed():
+    """Every pinned hash must be a 64-char lowercase hex string."""
+    import tornion._binary as _binary
+    import re
+
+    assert _binary.KNOWN_TOR_HASHES, "no pinned hashes — security check disabled"
+    hex_re = re.compile(r"^[0-9a-f]{64}$")
+    for version, by_platform in _binary.KNOWN_TOR_HASHES.items():
+        assert by_platform, f"version {version} has no platforms"
+        for suffix, h in by_platform.items():
+            assert hex_re.match(h), f"{version}/{suffix}: {h!r} is not a sha256"
+
+
+def test_default_version_has_pinned_hashes():
+    """The version we ship by default MUST have hashes for the desktop platforms."""
+    import tornion._binary as _binary
+
+    by_platform = _binary.KNOWN_TOR_HASHES.get(_binary.DEFAULT_TOR_VERSION)
+    assert by_platform is not None, \
+        f"DEFAULT_TOR_VERSION={_binary.DEFAULT_TOR_VERSION} not in KNOWN_TOR_HASHES"
+    for suffix in ("linux-x86_64", "macos-aarch64", "macos-x86_64",
+                   "windows-x86_64", "windows-i686"):
+        assert suffix in by_platform, f"missing pinned hash for {suffix}"
+
+
+def test_expected_hash_unknown_returns_none():
+    import tornion._binary as _binary
+    assert _binary._expected_hash("999.0.0", "linux-x86_64") is None
+    assert _binary._expected_hash(_binary.DEFAULT_TOR_VERSION, "fictional-arch") is None
+
+
+def test_hash_file_matches_known_value(tmp_path):
+    """`_hash_file` must match the well-known SHA-256 of a tiny file."""
+    import tornion._binary as _binary
+
+    p = tmp_path / "blob"
+    p.write_bytes(b"hello")
+    # SHA-256 of "hello" — well-known, no way to fake it
+    assert _binary._hash_file(p) == \
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+
+def test_install_tor_unknown_version_fails_fast(monkeypatch, tmp_path):
+    """Unknown version → TorBinaryNotFound BEFORE any download is attempted."""
+    import tornion._binary as _binary
+
+    monkeypatch.setattr(_binary, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(_binary, "_detect_platform_suffix", lambda: "linux-x86_64")
+    monkeypatch.delenv("TORNION_INSECURE_SKIP_HASH_CHECK", raising=False)
+
+    # Refuse to be silent if the test ever leaks into a real network call.
+    def _no_download(*a, **kw):
+        raise AssertionError("install_tor must not download for unknown versions")
+
+    monkeypatch.setattr(_binary, "_download_with_progress", _no_download)
+
+    try:
+        _binary.install_tor(version="999.99.99", progress=False)
+    except tornion.TorBinaryNotFound as e:
+        msg = str(e)
+        assert "No SHA-256 hash on file" in msg
+        assert "999.99.99" in msg
+    else:
+        raise AssertionError("Expected TorBinaryNotFound for unknown version")
+
+
+def test_install_tor_hash_mismatch_raises(monkeypatch, tmp_path):
+    """A successful download with the wrong bytes → TorBinaryNotFound."""
+    import tornion._binary as _binary
+
+    monkeypatch.setattr(_binary, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(_binary, "_detect_platform_suffix", lambda: "linux-x86_64")
+    monkeypatch.delenv("TORNION_INSECURE_SKIP_HASH_CHECK", raising=False)
+
+    # Simulate the download: write deterministic junk that won't match the
+    # pinned hash for the default version.
+    from pathlib import Path as _Path
+    def _fake_download(url, dest):
+        _Path(dest).write_bytes(b"this is definitely not the real tor archive")
+
+    monkeypatch.setattr(_binary, "_download_with_progress", _fake_download)
+    monkeypatch.setattr("urllib.request.urlretrieve",
+                        lambda url, dest: _fake_download(url, dest))
+
+    try:
+        _binary.install_tor(progress=False)
+    except tornion.TorBinaryNotFound as e:
+        msg = str(e)
+        assert "SHA-256 mismatch" in msg
+        # Both the expected pinned hash and our junk hash must appear.
+        assert "expected:" in msg and "actual:" in msg
+    else:
+        raise AssertionError("Expected TorBinaryNotFound on hash mismatch")
