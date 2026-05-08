@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 import re
 import signal
+import sys
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from .. import _binary, _tor
 from ..exceptions import HiddenServiceError
@@ -37,6 +38,37 @@ def _resolve_key_dir(key_dir: Optional[str | Path], app_name: str) -> Path:
         p = _binary.data_dir() / "hs" / _slugify(app_name)
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _resolve_app_name(app: Any) -> Tuple[str, str]:
+    """Pick a stable slug for the .onion identity, plus a human source label.
+
+    Returned as ``(app_name, source)`` where ``source`` describes — in plain
+    English — why this slug was chosen, so the user can see it on stdout.
+
+    Resolution order, most-to-least preferred:
+        1. Entry-script basename — ``python myserver.py`` → "myserver".
+           Stable across reruns as long as the file name doesn't change.
+        2. ``__main__`` module name — ``python -m mypackage`` → "mypackage".
+        3. Hard fallback "default" (e.g. when called from a REPL).
+
+    We deliberately do NOT consult ``app.title`` or ``type(app).__name__``:
+    both shift between runs (default FastAPI title, refactored class name)
+    and would silently invalidate the user's .onion identity.
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and not argv0.startswith("-"):
+        stem = Path(argv0).stem
+        if stem and stem not in ("__main__", "-c"):
+            return stem, f"from entry script ({argv0})"
+
+    main_mod = sys.modules.get("__main__")
+    if main_mod is not None:
+        spec = getattr(main_mod, "__spec__", None)
+        if spec is not None and spec.name and spec.name != "__main__":
+            return spec.name.replace(".", "_"), f"from __main__ module ({spec.name})"
+
+    return "default", "no entry point detected — using fallback slug"
 
 
 def _free_port() -> int:
@@ -163,7 +195,10 @@ def serve(
             user data dir, slot named after `app_name`. Reuse the same
             directory across runs to keep a stable .onion address.
         app_name: Slug used to derive the default key_dir. Default:
-            inferred from the app object.
+            the entry-script basename (`python myserver.py` → "myserver"),
+            or the `__main__` module name when launched via `python -m`,
+            falling back to "default" otherwise. Pass an explicit value
+            for full control of where your identity lives.
         bootstrap_timeout: Max seconds to wait for tor bootstrap.
         auto_install: Auto-download tor if missing.
         log_level: uvicorn log level.
@@ -193,22 +228,42 @@ def serve(
         port = _free_port()
 
     if app_name is None:
-        app_name = getattr(app, "title", None) or type(app).__name__ or "default"
+        app_name, name_source = _resolve_app_name(app)
+    else:
+        name_source = "explicit app_name argument"
+
+    # Resolve key_dir up front so we can tell the user, *before* tor bootstrap,
+    # whether this run will publish a brand-new .onion or reuse an existing
+    # one. Hidden in the past behind the HiddenService constructor — too late
+    # for the user to notice that today's run has a different identity than
+    # yesterday's.
+    resolved_key_dir = _resolve_key_dir(key_dir, app_name)
+    secret_key_file = resolved_key_dir / "hs_ed25519_secret_key"
+    is_fresh_identity = not secret_key_file.exists()
+
+    print("🧅 tornion — Tor hidden service")
+    print(f"   app_name   : {app_name}  ({name_source})")
+    print(f"   key_dir    : {resolved_key_dir}")
+    if is_fresh_identity:
+        print( "   identity   : NEW — a fresh .onion will be generated")
+        print(f"                back up `{secret_key_file.name}` to keep this address")
+    else:
+        print( "   identity   : reusing existing key — same .onion as last run")
+    print(f"   local port : {port}")
+    print()
+    print("🧅 starting tor...")
 
     hs = HiddenService(
         target_host=host,
         target_port=port,
-        key_dir=key_dir,
+        key_dir=resolved_key_dir,
         app_name=app_name,
         bootstrap_timeout=bootstrap_timeout,
         auto_install=auto_install,
     )
 
-    print("🧅 starting tor...")
     hs.start()
     print(f"\n🚀 hidden service published:\n   {hs.onion_url}")
-    print(f"\n   key persisted at: {hs.key_dir}")
-    print(f"   local port      : {port}")
     print("\nPress Ctrl+C to stop.\n")
 
     # Make sure tor is killed even if uvicorn crashes

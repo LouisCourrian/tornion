@@ -91,3 +91,39 @@ def test_normalize_wsgi_wraps_via_asgiref():
     wrapped = server.normalize_to_asgi(wsgi_app)
     assert wrapped is not wsgi_app
     assert callable(wrapped)
+
+
+# ---------- app_name resolution (stable .onion identity) ----------
+
+def test_resolve_app_name_uses_entry_script(monkeypatch):
+    """`python myserver.py` → app_name "myserver" (stable across reruns)."""
+    from tornion.server.runner import _resolve_app_name
+
+    monkeypatch.setattr("sys.argv", ["/some/path/myserver.py"])
+    name, source = _resolve_app_name(object())
+    assert name == "myserver"
+    assert "entry script" in source
+
+
+def test_resolve_app_name_ignores_app_title(monkeypatch):
+    """The new resolver MUST NOT consult app.title (was the fragile path)."""
+    from tornion.server.runner import _resolve_app_name
+
+    class FakeFastAPI:
+        title = "should-be-ignored"
+
+    monkeypatch.setattr("sys.argv", ["/some/path/myserver.py"])
+    name, _ = _resolve_app_name(FakeFastAPI())
+    assert name == "myserver"
+    assert "should-be-ignored" not in name
+
+
+def test_resolve_app_name_falls_back_to_default(monkeypatch):
+    """Empty/REPL argv → "default" with a clear source label."""
+    from tornion.server.runner import _resolve_app_name
+
+    monkeypatch.setattr("sys.argv", [""])
+    monkeypatch.delitem(__import__("sys").modules, "__main__", raising=False)
+    name, source = _resolve_app_name(object())
+    assert name == "default"
+    assert "fallback" in source.lower() or "no entry point" in source.lower()

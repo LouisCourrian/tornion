@@ -155,10 +155,11 @@ production-ish code.
 
 Required before tagging `1.0.0`:
 
-- [ ] **Stable `.onion` by default.** Stop deriving `app_name` from
-      `app.title` (fragile). Either require it explicitly, or fall back
-      to the entry-script name, and log the resolved `key_dir` loudly
-      on first run so users see where their identity lives.
+- [x] **Stable `.onion` by default.** ~~Stop deriving `app_name` from
+      `app.title` (fragile).~~ `app_name` now defaults to the entry-script
+      basename (`python myserver.py` → `myserver`); `serve()` prints the
+      resolved `key_dir` and a fresh-vs-existing identity status before
+      tor bootstrap so the first run is never silent.
 - [ ] **Verify Tor Expert Bundle downloads.** Either pin SHA-256 hashes
       per version or check the Tor Project's GPG signature before
       executing the binary.
