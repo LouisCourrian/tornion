@@ -146,11 +146,13 @@ pytest
 python examples/server_fastapi.py
 ```
 
-## 🚧 Status
+## ✅ Status
 
-`tornion` is in **alpha**. The public API is settling but may still shift
-slightly before `1.0.0`. Pin to a minor version (`tornion>=0.5,<0.6`) in
-production-ish code.
+`tornion` is **stable** as of `1.0.0`. The public API of `tornion`,
+`tornion.client`, and `tornion.server` follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html); see
+[CHANGELOG.md](CHANGELOG.md) for the full versioning policy and release
+history. Pin to a major version (`tornion>=1.0,<2.0`) and you're good.
 
 ## 🗺️ Roadmap to 1.0
 
@@ -170,9 +172,9 @@ Required before tagging `1.0.0`:
       [CHANGELOG.md](CHANGELOG.md) — Keep-a-Changelog format, with an
       explicit policy at the top stating what counts as MAJOR / MINOR
       / PATCH and the deprecation window.
-- [ ] **Publish `1.0.0` to PyPI.** Reserve the `tornion` name, set up
-      a trusted-publisher GitHub Actions workflow (no API token in
-      secrets), and tag the first stable release.
+- [x] **Publish `1.0.0` to PyPI.** Trusted-publisher GitHub Actions
+      workflow lives at [.github/workflows/publish.yml](.github/workflows/publish.yml);
+      releases are triggered by pushing a `v*` tag.
 
 Quick wins (small, high-value):
 

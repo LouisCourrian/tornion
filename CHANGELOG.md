@@ -78,6 +78,34 @@ _No changes yet._
 
 ---
 
+## [1.0.0] — 2026-05-08
+
+First stable release. From this point on, the public API of `tornion`,
+`tornion.client`, and `tornion.server` is under the SemVer guarantee
+documented in the *Versioning policy* section above.
+
+### Added
+- GitHub Actions workflow ([`.github/workflows/publish.yml`](.github/workflows/publish.yml))
+  that publishes to PyPI via OIDC trusted publisher whenever a `v*`
+  tag is pushed. No API tokens stored in repo secrets.
+- `Changelog` and `Documentation` URLs in `[project.urls]`, exposed in
+  PyPI's project sidebar.
+- `CHANGELOG.md` and `docs/` are now packaged inside the sdist
+  uploaded to PyPI.
+
+### Changed
+- Trove classifier flipped from `Development Status :: 3 - Alpha` to
+  `5 - Production/Stable`.
+- README "Status" section now states the SemVer commitment and
+  recommends `tornion>=1.0,<2.0` for pinning.
+
+### No functional changes since 0.6.0
+This release codifies the API contract for all the work that landed
+during the 0.x series — there are no behavior changes between 0.6.0
+and 1.0.0.
+
+---
+
 ## [0.6.0] — 2026-05-08
 
 ### Added
