@@ -1,4 +1,4 @@
-"""Command-line interface: ``tornion install-tor | get | serve | info``."""
+"""Command-line interface: ``tornion install-tor | get | serve | info | keygen | onion``."""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,7 @@ import importlib
 import json as _json
 import logging
 import sys
+from pathlib import Path
 
 from . import _binary, _version
 from .client import session as _session
@@ -95,12 +96,57 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_keygen(args: argparse.Namespace) -> int:
+    """Generate a fresh v3 hs_ed25519_secret_key (no tor needed)."""
+    from . import _onion
+
+    out_dir = Path(args.out).expanduser().resolve()
+    secret_path = out_dir / _onion.SECRET_KEY_FILE
+
+    if secret_path.exists() and not args.force:
+        print(
+            f"❌ {secret_path} already exists. Use --force to overwrite "
+            f"(this destroys the existing .onion identity).",
+            file=sys.stderr,
+        )
+        return 1
+
+    written = _onion.write_secret_key(out_dir)
+    print(f"✅ wrote {written}")
+    print()
+    print(f"Next steps:")
+    print(f"  - to learn the .onion address derived from this key, run:")
+    print(f"        tornion onion {out_dir}")
+    print(f"    (tor populates the hostname file the first time the key is loaded)")
+    print(f"  - to serve an app on this identity:")
+    print(f"        TORNION_KEY_DIR={out_dir} tornion serve module:app")
+    print(f"  - keep `{_onion.SECRET_KEY_FILE}` safe — it IS your .onion identity.")
+    return 0
+
+
+def _cmd_onion(args: argparse.Namespace) -> int:
+    """Print the .onion address derived from a key directory."""
+    from . import _onion
+
+    try:
+        url = _onion.onion_for_key_dir(Path(args.key_dir))
+    except (ValueError, OSError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    print(url)
+    return 0
+
+
 def _cmd_info(args: argparse.Namespace) -> int:
+    import os
     from . import _tor
 
     print(f"tornion {_version.__version__}")
     print(f"  cache dir         : {_binary.cache_dir()}")
     print(f"  data dir          : {_binary.data_dir()}")
+    env_key_dir = os.environ.get("TORNION_KEY_DIR")
+    if env_key_dir:
+        print(f"  TORNION_KEY_DIR   : {env_key_dir}")
 
     p = _binary.installed_tor_path()
     if p:
@@ -179,6 +225,33 @@ def main(argv: list[str] | None = None) -> int:
 
     p_info = sub.add_parser("info", help="Print diagnostic info")
     p_info.set_defaults(func=_cmd_info)
+
+    p_keygen = sub.add_parser(
+        "keygen",
+        help="Generate a fresh v3 hidden service secret key (no tor needed)",
+    )
+    p_keygen.add_argument(
+        "--out",
+        default="./onion-key",
+        help="Directory to write hs_ed25519_secret_key into "
+             "(created if missing; default: ./onion-key)",
+    )
+    p_keygen.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing key file (destroys the existing .onion identity)",
+    )
+    p_keygen.set_defaults(func=_cmd_keygen)
+
+    p_onion = sub.add_parser(
+        "onion",
+        help="Print the .onion address derived from an existing key directory",
+    )
+    p_onion.add_argument(
+        "key_dir",
+        help="Directory containing hostname / hs_ed25519_public_key / hs_ed25519_secret_key",
+    )
+    p_onion.set_defaults(func=_cmd_onion)
 
     args = parser.parse_args(argv)
 

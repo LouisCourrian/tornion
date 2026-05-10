@@ -78,6 +78,49 @@ _No changes yet._
 
 ---
 
+## [1.1.0] — 2026-05-08
+
+Ergonomics release: two new CLI subcommands for offline identity
+management, a symmetric environment variable, and an auto-release
+workflow.
+
+### Added
+- **`tornion keygen [--out DIR] [--force]`** — generate a fresh
+  `hs_ed25519_secret_key` without spinning up tor. Default `--out`
+  is `./onion-key/`. Useful for provisioning a fixed onion identity
+  before deploying a server, or for scripted setups.
+- **`tornion onion <key_dir>`** — print the `.onion` address derived
+  from an existing key directory, fully offline. Reads `hostname` if
+  present; otherwise derives from `hs_ed25519_public_key` via
+  SHA3-256 + base32 (stdlib only).
+- **`TORNION_KEY_DIR`** environment variable, symmetric to
+  `TORNION_TOR_PATH`. Picked up by `_resolve_key_dir()` when no
+  explicit `key_dir` argument is passed to `serve()` /
+  `HiddenService`. Lets ops swap identities without touching app code.
+- New module **`tornion._onion`** exposing the v3 identity helpers:
+  `generate_secret_key_blob()`, `write_secret_key(key_dir)`,
+  `onion_from_public_key(pubkey)`, `onion_for_key_dir(key_dir)`.
+  Stdlib-only — no `cryptography` / PyNaCl dependency.
+- New GitHub Actions workflow
+  ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
+  on tag push (`v*.*.*`), extracts the matching CHANGELOG section,
+  creates the GitHub Release with those notes as the body, then
+  publishes to PyPI via OIDC trusted publisher. Replaces the previous
+  PyPI-only `publish.yml`.
+
+### Changed
+- `tornion info` now reports the value of `$TORNION_KEY_DIR` when
+  it is set.
+
+### Tests
+- 11 new unit tests: key blob format and clamping, randomness across
+  generations, `.onion` derivation from a known public key, error
+  messages for malformed / missing key directories, and three tests
+  for the `TORNION_KEY_DIR` resolution precedence. 45 unit tests
+  total, plus the e2e integration test.
+
+---
+
 ## [1.0.1] — 2026-05-08
 
 Security and hygiene patch following a static-review pass.

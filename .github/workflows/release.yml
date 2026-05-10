@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.1.0). Must already exist."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      # Exposed so publish-pypi can check out the right tag, even when
+      # the workflow was triggered via workflow_dispatch (in which case
+      # github.ref_name is "main", not the tag).
+      tag: ${{ steps.ref.outputs.tag }}
+    steps:
+      - name: Determine target tag
+        id: ref
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${DISPATCH_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.tag }}
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: |
+          python3 - <<'PYEOF' > release-notes.md
+          import os, re, sys
+          tag = os.environ["TAG"]
+          version = tag.lstrip("v")
+          header = re.compile(rf"^##\s+\[{re.escape(version)}\]")
+          next_section = re.compile(r"^##\s+\[")
+          in_section = False
+          with open("CHANGELOG.md", encoding="utf-8") as f:
+              for line in f:
+                  if header.match(line):
+                      in_section = True
+                      continue
+                  if in_section and next_section.match(line):
+                      break
+                  if in_section:
+                      sys.stdout.write(line)
+          PYEOF
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No CHANGELOG section found for ${TAG} (looked for '## [${TAG#v}]')"
+            exit 1
+          fi
+          echo "===Release notes for ${TAG}==="
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ref.outputs.tag }}
+          name: ${{ steps.ref.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: release
+    environment: pypi
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build package
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

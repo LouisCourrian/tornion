@@ -7,6 +7,7 @@ same auto-download, same env vars. The difference is the tor config
 from __future__ import annotations
 
 import logging
+import os
 import re
 import signal
 import sys
@@ -30,8 +31,17 @@ def _slugify(text: str) -> str:
 def _resolve_key_dir(key_dir: Optional[str | Path], app_name: str) -> Path:
     """Pick where to store the hidden service ed25519 key.
 
-    Default: <user data dir>/tornion/hs/<app_name>/
+    Resolution order:
+        1. Explicit ``key_dir`` argument (takes precedence).
+        2. ``$TORNION_KEY_DIR`` environment variable. Symmetric to
+           ``$TORNION_TOR_PATH``: lets ops point at a fixed identity
+           directory without touching application code.
+        3. Default: ``<user data dir>/tornion/hs/<app_name>/``.
     """
+    if key_dir is None:
+        env = os.environ.get("TORNION_KEY_DIR")
+        if env:
+            key_dir = env
     if key_dir is not None:
         p = Path(key_dir).expanduser().resolve()
     else:

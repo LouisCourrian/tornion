@@ -127,3 +127,36 @@ def test_resolve_app_name_falls_back_to_default(monkeypatch):
     name, source = _resolve_app_name(object())
     assert name == "default"
     assert "fallback" in source.lower() or "no entry point" in source.lower()
+
+
+# ---------- TORNION_KEY_DIR env var ----------
+
+def test_resolve_key_dir_explicit_wins_over_env(monkeypatch, tmp_path):
+    """An explicit `key_dir` argument must beat $TORNION_KEY_DIR."""
+    from tornion.server.runner import _resolve_key_dir
+
+    monkeypatch.setenv("TORNION_KEY_DIR", str(tmp_path / "from-env"))
+    explicit = tmp_path / "from-arg"
+    resolved = _resolve_key_dir(explicit, app_name="ignored")
+    assert resolved == explicit.resolve()
+
+
+def test_resolve_key_dir_picks_up_env(monkeypatch, tmp_path):
+    """When key_dir is None, $TORNION_KEY_DIR is used."""
+    from tornion.server.runner import _resolve_key_dir
+
+    env_dir = tmp_path / "from-env"
+    monkeypatch.setenv("TORNION_KEY_DIR", str(env_dir))
+    resolved = _resolve_key_dir(None, app_name="ignored-because-env-wins")
+    assert resolved == env_dir.resolve()
+    assert resolved.exists()
+
+
+def test_resolve_key_dir_falls_back_to_data_dir(monkeypatch, tmp_path):
+    """When neither argument nor env var is set, fall back to <data>/hs/<slug>/."""
+    import tornion.server.runner as _runner
+    monkeypatch.delenv("TORNION_KEY_DIR", raising=False)
+    monkeypatch.setattr(_runner._binary, "data_dir", lambda: tmp_path)
+
+    resolved = _runner._resolve_key_dir(None, app_name="myapp")
+    assert resolved == (tmp_path / "hs" / "myapp").resolve()

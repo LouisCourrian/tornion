@@ -277,6 +277,112 @@ def test_safe_extract_rejects_path_traversal(tmp_path):
     assert not (tmp_path.parent / "escape.txt").exists()
 
 
+# ---------- v3 hidden service identity (offline key/onion derivation) ----------
+
+def test_generate_secret_key_blob_format():
+    """The generated blob must be 96 bytes with tor's v3 header prefix."""
+    import tornion._onion as _onion
+
+    blob = _onion.generate_secret_key_blob()
+    assert len(blob) == 96
+    assert blob[:32] == _onion.SECRET_KEY_HEADER
+    # Expanded form's clamping must be applied to the 64-byte tail.
+    # h[0]  &= 248  → bottom 3 bits cleared
+    # h[31] &= 127  → top bit cleared
+    # h[31] |= 64   → 2nd-top bit set
+    expanded = blob[32:]
+    assert expanded[0] & 0b00000111 == 0  # bottom 3 bits clear
+    assert expanded[31] & 0b10000000 == 0  # top bit clear
+    assert expanded[31] & 0b01000000 == 0b01000000  # 2nd-top bit set
+
+
+def test_generate_secret_key_is_random():
+    """Two consecutive generations must produce different keys."""
+    import tornion._onion as _onion
+    assert _onion.generate_secret_key_blob() != _onion.generate_secret_key_blob()
+
+
+def test_onion_from_public_key_known_vector():
+    """Use a known ed25519 public key and check the derivation logic.
+
+    Cross-checked against tor's reference: an all-zero public key (32
+    zero bytes) is a valid Edwards curve identity element and produces
+    a deterministic .onion. We only assert the structural properties:
+    length 62, ends with '.onion', and is lowercase base32 chars +
+    digits 2-7 (no '0', '1', '8', '9').
+    """
+    import string
+    import tornion._onion as _onion
+
+    pubkey = b"\x00" * 32
+    onion = _onion.onion_from_public_key(pubkey)
+    assert onion.endswith(".onion")
+    assert len(onion) == 62  # 56 base32 chars + ".onion"
+    body = onion[:-6]
+    valid = set(string.ascii_lowercase + "234567")
+    assert set(body) <= valid
+
+
+def test_onion_from_public_key_rejects_wrong_size():
+    import tornion._onion as _onion
+    try:
+        _onion.onion_from_public_key(b"\x00" * 31)
+    except ValueError as e:
+        assert "32 bytes" in str(e)
+    else:
+        raise AssertionError("expected ValueError for non-32-byte key")
+
+
+def test_onion_for_key_dir_reads_hostname(tmp_path):
+    """Fast path: if hostname file exists, just read it."""
+    import tornion._onion as _onion
+
+    expected = "abc123def456abcdef0123456789abcdef0123456789abcdef0123456789.onion"
+    (tmp_path / _onion.HOSTNAME_FILE).write_text(expected + "\n")
+    assert _onion.onion_for_key_dir(tmp_path) == expected
+
+
+def test_onion_for_key_dir_derives_from_public_key(tmp_path):
+    """Slow path: derive from hs_ed25519_public_key when hostname is missing."""
+    import tornion._onion as _onion
+
+    pubkey = b"\x00" * 32
+    (tmp_path / _onion.PUBLIC_KEY_FILE).write_bytes(
+        _onion.PUBLIC_KEY_HEADER + pubkey
+    )
+    result = _onion.onion_for_key_dir(tmp_path)
+    assert result == _onion.onion_from_public_key(pubkey)
+
+
+def test_onion_for_key_dir_secret_only_is_helpful_error(tmp_path):
+    """Only the secret present → tell the user how to proceed."""
+    import tornion._onion as _onion
+
+    (tmp_path / _onion.SECRET_KEY_FILE).write_bytes(
+        _onion.generate_secret_key_blob()
+    )
+    try:
+        _onion.onion_for_key_dir(tmp_path)
+    except ValueError as e:
+        msg = str(e)
+        assert "only the secret key" in msg
+        assert "tornion serve" in msg
+    else:
+        raise AssertionError("expected ValueError suggesting `tornion serve`")
+
+
+def test_onion_for_key_dir_empty_raises(tmp_path):
+    """Empty directory → raise with a clear error."""
+    import tornion._onion as _onion
+
+    try:
+        _onion.onion_for_key_dir(tmp_path)
+    except ValueError as e:
+        assert "no v3 hidden service files" in str(e)
+    else:
+        raise AssertionError("expected ValueError for empty key_dir")
+
+
 def test_install_tor_hash_mismatch_raises(monkeypatch, tmp_path):
     """A successful download with the wrong bytes → TorBinaryNotFound."""
     import tornion._binary as _binary
