@@ -78,6 +78,56 @@ _No changes yet._
 
 ---
 
+## [1.0.1] — 2026-05-08
+
+Security and hygiene patch following a static-review pass.
+
+### Security
+- **`detect_running_tor()` now actually verifies the SOCKS5 server is Tor.**
+  The previous probe accepted any SOCKS5-speaking endpoint, which would
+  have let tornion silently route privacy-sensitive traffic through a
+  non-Tor proxy (e.g. proxychains, dante, `ssh -D`) running on the
+  default Tor ports. The probe now performs Tor's RESOLVE protocol
+  extension (SOCKS5 command byte `0xF0`); plain SOCKS5 servers reply
+  with REP=0x07 ("Command not supported") and are rejected.
+- **Hardened tar extraction for Python 3.9–3.11.** `install_tor()`
+  previously fell back to bare `tarfile.extractall()` when the
+  `filter="data"` argument (3.12+) wasn't available, leaving a path
+  traversal window open if a malicious archive ever defeated the
+  SHA-256 pin. New `_safe_extract_tar()` validates every member —
+  rejects symlinks, hardlinks, devices, FIFOs, absolute paths, and
+  any path that resolves outside the target directory — before
+  calling `extractall`.
+
+### Changed
+- Reusing an externally-managed tor (`use_existing=True`, default)
+  now logs a `WARNING` instead of `INFO`, telling the user explicitly
+  that `tornion` did not start tor itself and pointing at
+  `use_existing=False` for full management.
+- Per-HS `tor-data` cache subdirectory name is now `hs-<sha256(key_dir)[:16]>`
+  instead of `hs-<builtin hash()>`. The builtin `hash()` is salted by
+  `PYTHONHASHSEED` and produced a different name on every Python
+  process, accumulating orphan cache directories. The on-disk `.onion`
+  identity itself was never affected.
+
+### Fixed
+- `tornion.server.runner.serve()` docstring example showed
+  `import tornion; tornion.serve(app)`, contradicting the documented
+  `from tornion import server; server.serve(app)` usage that the test
+  suite enforces.
+- README: removed the static "tests 21 passed" badge (misleading —
+  the count had drifted and there is no continuous CI signal behind it).
+- README: section title `Roadmap to 1.0` renamed to `Roadmap` now
+  that 1.0 has shipped.
+
+### Tests
+- 4 new unit tests: probe rejects plain SOCKS5 (security regression
+  guard), probe accepts Tor's RESOLVE response, safe extract refuses
+  absolute paths, safe extract refuses path traversal. 34 unit tests
+  total, plus the e2e integration test.
+
+---
+
 ## [1.0.0] — 2026-05-08
 
 First stable release. From this point on, the public API of `tornion`,

@@ -206,9 +206,9 @@ def serve(
 
     Example:
         >>> from fastapi import FastAPI
-        >>> import tornion
+        >>> from tornion import server
         >>> app = FastAPI()
-        >>> tornion.serve(app)
+        >>> server.serve(app)
     """
     try:
         import uvicorn

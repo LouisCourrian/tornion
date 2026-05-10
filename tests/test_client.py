@@ -148,6 +148,135 @@ def test_install_tor_unknown_version_fails_fast(monkeypatch, tmp_path):
         raise AssertionError("Expected TorBinaryNotFound for unknown version")
 
 
+def test_probe_rejects_plain_socks5(monkeypatch):
+    """A SOCKS5 proxy that doesn't speak Tor's RESOLVE must NOT be reused.
+
+    This is the security fix from 1.0.1: previously `_probe_socks5` only
+    checked that something speaks SOCKS5, which would happily match
+    proxychains / dante / `ssh -D` and route privacy-sensitive traffic
+    through a non-Tor proxy.
+    """
+    import socket as _socket
+    import tornion._tor as _tor
+
+    class _FakeSocket:
+        """Minimal SOCKS5 server that supports greeting but rejects RESOLVE."""
+        def __init__(self):
+            self._sent = b""
+            self._step = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def settimeout(self, _t):
+            pass
+
+        def sendall(self, data):
+            self._sent += data
+
+        def recv(self, n):
+            # First recv = greeting reply. NO_AUTH accepted.
+            if self._step == 0:
+                self._step = 1
+                return b"\x05\x00"
+            # Second recv = response to RESOLVE. Standard SOCKS5 says
+            # "Command not supported" (REP=0x07).
+            return b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00"
+
+    monkeypatch.setattr(_socket, "create_connection",
+                        lambda addr, timeout=None: _FakeSocket())
+
+    assert _tor._probe_socks5("127.0.0.1", 9050) is False
+
+
+def test_probe_accepts_tor_socks5(monkeypatch):
+    """Tor's SOCKS5 implements RESOLVE; the probe must match it."""
+    import socket as _socket
+    import tornion._tor as _tor
+
+    class _TorSocket:
+        def __init__(self):
+            self._step = 0
+
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def settimeout(self, _t): pass
+        def sendall(self, _data): pass
+
+        def recv(self, n):
+            if self._step == 0:
+                self._step = 1
+                return b"\x05\x00"
+            # Tor accepted RESOLVE and returned a (fake) resolved address.
+            return b"\x05\x00\x00\x01\x5d\xb8\xd8\x22\x00\x50"
+
+    monkeypatch.setattr(_socket, "create_connection",
+                        lambda addr, timeout=None: _TorSocket())
+
+    assert _tor._probe_socks5("127.0.0.1", 9050) is True
+
+
+def test_safe_extract_rejects_absolute_paths(tmp_path):
+    """A tarball with an absolute path must be refused.
+
+    On Python 3.12+ this is enforced by ``filter="data"``; on 3.9-3.11 by
+    our manual validation. Either way ``_safe_extract_tar`` must raise
+    rather than write outside ``target_dir``.
+    """
+    import tarfile
+    import io
+    import tornion._binary as _binary
+
+    archive = tmp_path / "evil.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo(name="/etc/passwd")
+        info.size = 5
+        tar.addfile(info, io.BytesIO(b"hello"))
+
+    out = tmp_path / "out"
+    out.mkdir()
+
+    raised = False
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            _binary._safe_extract_tar(tar, out)
+        except Exception:
+            raised = True
+
+    assert raised, "absolute-path member was extracted — security regression"
+    assert not (out / "etc" / "passwd").exists()
+
+
+def test_safe_extract_rejects_path_traversal(tmp_path):
+    """A tarball with ``..`` that escapes target_dir must be refused."""
+    import tarfile
+    import io
+    import tornion._binary as _binary
+
+    archive = tmp_path / "evil.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo(name="../../escape.txt")
+        info.size = 4
+        tar.addfile(info, io.BytesIO(b"pwn!"))
+
+    out = tmp_path / "out"
+    out.mkdir()
+
+    raised = False
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            _binary._safe_extract_tar(tar, out)
+        except Exception:
+            raised = True
+
+    assert raised, "path-traversal member was extracted — security regression"
+    # Make sure nothing landed two directories up from out/
+    assert not (tmp_path.parent / "escape.txt").exists()
+
+
 def test_install_tor_hash_mismatch_raises(monkeypatch, tmp_path):
     """A successful download with the wrong bytes → TorBinaryNotFound."""
     import tornion._binary as _binary

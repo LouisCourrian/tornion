@@ -12,6 +12,7 @@ Exposes:
 from __future__ import annotations
 
 import atexit
+import hashlib
 import logging
 import os
 import socket
@@ -55,14 +56,51 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _probe_socks5(host: str, port: int, timeout: float = 0.3) -> bool:
-    """Return True if host:port speaks SOCKS5 (no-auth method offered)."""
+def _probe_socks5(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Return True iff host:port is a **Tor** SOCKS5 server.
+
+    A plain SOCKS5 probe (greeting only) cannot distinguish Tor from any
+    other SOCKS5 proxy — proxychains, dante, ``ssh -D``, etc. would all
+    pass and tornion would happily route privacy-sensitive traffic
+    through them. Two-step check instead:
+
+        1. SOCKS5 greeting / auth-method negotiation
+           (filters out non-SOCKS5 services).
+        2. SOCKS5 RESOLVE request (command byte ``\\xf0``) — a Tor
+           protocol extension. Plain SOCKS5 servers reply with
+           REP=0x07 ("Command not supported") or close the connection;
+           Tor parses and dispatches the command and returns any other
+           REP code.
+
+    Both must pass. A false positive would mean Tor's RESOLVE protocol
+    is implemented by something that isn't Tor — unlikely in practice.
+    """
     try:
         with socket.create_connection((host, port), timeout=timeout) as s:
             s.settimeout(timeout)
-            s.sendall(b"\x05\x01\x00")  # SOCKS5 client greeting
+
+            # 1. SOCKS5 greeting: VER=5, 1 method, NO_AUTH (0x00).
+            s.sendall(b"\x05\x01\x00")
             resp = s.recv(2)
-            return len(resp) == 2 and resp[0] == 0x05
+            if len(resp) != 2 or resp[0] != 0x05 or resp[1] != 0x00:
+                return False
+
+            # 2. Tor-specific RESOLVE request.
+            # Format: VER=5 CMD=0xF0 RSV=0 ATYP=3(domain) LEN DOMAIN PORT
+            hostname = b"example.com"
+            req = (
+                b"\x05\xf0\x00\x03"
+                + bytes([len(hostname)]) + hostname
+                + b"\x00\x00"  # port=0, ignored by RESOLVE
+            )
+            s.sendall(req)
+            resp = s.recv(10)
+            if len(resp) < 2 or resp[0] != 0x05:
+                return False
+            # REP=0x07 means "Command not supported" → vanilla SOCKS5.
+            # Any other REP code (success, network error, etc.) means
+            # the server understood the command → Tor.
+            return resp[1] != 0x07
     except (OSError, socket.timeout):
         return False
 
@@ -151,7 +189,14 @@ class TorManager:
             if existing is not None:
                 self._socks_port = existing
                 self._external = True
-                log.info("reusing existing tor on SOCKS5 :%d", existing)
+                # Surface this loudly: the user expects tornion to manage
+                # tor; reusing an outside instance is a side effect they
+                # should be aware of (and can disable via use_existing=False).
+                log.warning(
+                    "tornion reusing an externally-managed tor on SOCKS5 :%d "
+                    "(detected via Tor RESOLVE protocol). Pass use_existing=False "
+                    "to start a managed tor instead.", existing,
+                )
                 return
 
         port = socks_port if socks_port is not None else _free_port()
@@ -268,8 +313,13 @@ def launch_tor_for_hidden_service(
 
     binary = _binary.find_tor_binary(auto_install=auto_install)
 
-    # Per-HS DataDirectory based on key_dir hash to avoid collisions
-    data_dir = _binary.cache_dir() / "tor-data" / f"hs-{abs(hash(str(key_dir))):x}"
+    # Per-HS DataDirectory based on a *stable* hash of the key_dir path.
+    # Using builtin hash() here would pick up Python's per-process
+    # PYTHONHASHSEED randomization, creating a new tor-data subdir on
+    # every run and accumulating cruft. SHA-256 of the normalized path
+    # is deterministic across processes and Python versions.
+    key_dir_digest = hashlib.sha256(str(key_dir).encode("utf-8")).hexdigest()[:16]
+    data_dir = _binary.cache_dir() / "tor-data" / f"hs-{key_dir_digest}"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     def _on_log(line: str) -> None:

@@ -7,7 +7,6 @@
 [![PyPI version](https://img.shields.io/pypi/v/tornion.svg)](https://pypi.org/project/tornion/)
 [![Python versions](https://img.shields.io/pypi/pyversions/tornion.svg)](https://pypi.org/project/tornion/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-21%20passed-brightgreen.svg)](tests/)
 
 *Consume any `.onion` API, or publish your own — in 3 lines of Python.*
 
@@ -154,9 +153,9 @@ python examples/server_fastapi.py
 [CHANGELOG.md](CHANGELOG.md) for the full versioning policy and release
 history. Pin to a major version (`tornion>=1.0,<2.0`) and you're good.
 
-## 🗺️ Roadmap to 1.0
+## 🗺️ Roadmap
 
-Required before tagging `1.0.0`:
+Required for `1.0.0` (✅ all shipped):
 
 - [x] **Stable `.onion` by default.** ~~Stop deriving `app_name` from
       `app.title` (fragile).~~ `app_name` now defaults to the entry-script

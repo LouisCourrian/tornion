@@ -62,6 +62,62 @@ def _hash_file(path: Path, *, chunk_size: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def _safe_extract_tar(tar: tarfile.TarFile, target_dir: Path) -> None:
+    """Extract ``tar`` into ``target_dir``, rejecting unsafe members.
+
+    On Python 3.12+ we delegate to the stdlib's ``filter="data"`` which
+    implements PEP 706 — the canonical safe extraction profile.
+
+    On Python 3.9-3.11 the filter parameter doesn't exist, so we
+    pre-validate every member and reject anything outside the data
+    profile:
+
+        - symlinks, hardlinks, devices, FIFOs (only files and dirs OK)
+        - absolute paths (Unix ``/foo`` or Windows ``C:\\foo``)
+        - paths that escape ``target_dir`` via ``..`` after normalization
+
+    A malicious Tor Expert Bundle would have to defeat the SHA-256 pin
+    *first* to reach this code path, but defense-in-depth is the whole
+    point of a Tor toolchain.
+    """
+    target_resolved = target_dir.resolve()
+
+    # Fast path: Python 3.12+ does this for us.
+    try:
+        tar.extractall(target_dir, filter="data")
+        return
+    except TypeError:
+        pass  # filter= unsupported; fall through to manual validation
+
+    for member in tar.getmembers():
+        # Only allow regular files and directories.
+        if member.isdev() or member.issym() or member.islnk() or member.isfifo():
+            raise TorBinaryNotFound(
+                f"Tor Expert Bundle contains unsafe member type "
+                f"({member.name!r}, type={member.type!r}); aborting extraction"
+            )
+
+        # Reject absolute paths (POSIX or Windows-style).
+        name = member.name
+        if name.startswith(("/", "\\")) or (len(name) >= 2 and name[1] == ":"):
+            raise TorBinaryNotFound(
+                f"Tor Expert Bundle has absolute member path {name!r}; "
+                f"aborting extraction"
+            )
+
+        # Reject path traversal — resolve and check it stays under target.
+        resolved = (target_resolved / name).resolve()
+        try:
+            resolved.relative_to(target_resolved)
+        except ValueError:
+            raise TorBinaryNotFound(
+                f"Tor Expert Bundle member {name!r} would extract outside "
+                f"{target_resolved}; aborting extraction"
+            )
+
+    tar.extractall(target_dir)
+
+
 def cache_dir() -> Path:
     """Return the tornion per-user cache directory, creating it if needed."""
     if sys.platform == "win32":
@@ -289,10 +345,7 @@ def install_tor(
         target_dir.mkdir(parents=True)
 
         with tarfile.open(tmp_path, "r:gz") as tar:
-            try:
-                tar.extractall(target_dir, filter="data")
-            except TypeError:
-                tar.extractall(target_dir)
+            _safe_extract_tar(tar, target_dir)
     finally:
         tmp_path.unlink(missing_ok=True)
 
