@@ -220,6 +220,16 @@ class TorManager:
             "DataDirectory": str(data_dir),
             "MaxMemInQueues": "256 MB",
         }
+
+        # Wire up tornion's default client-auth directory so any
+        # `tornion.client.add_client_auth(...)` registered before this
+        # tor process started takes effect. Tor reads the dir on
+        # startup; new files added later require a tor restart
+        # (call tornion.shutdown() to force one).
+        from . import _client_auth
+        client_auth_dir = _client_auth.default_client_auth_dir()
+        config["ClientOnionAuthDir"] = str(client_auth_dir)
+
         if extra_config:
             config.update(extra_config)
 
@@ -271,9 +281,22 @@ def get_tor(**kwargs) -> TorManager:
 
 
 def shutdown() -> None:
-    """Manually shut down the managed client tor instance."""
+    """Manually shut down the managed client tor instance.
+
+    Also invalidates the module-level default ``client.Session`` so that
+    subsequent ``tornion.client.get(...)`` calls build a fresh session
+    against the *next* tor's SOCKS port. Without this, a session
+    captured the dead tor's port and every request would hang on a
+    connection refused.
+    """
     if TorManager._instance is not None:
         TorManager._instance.stop()
+    # Late import to avoid the tornion._tor ↔ tornion.client.session cycle.
+    try:
+        from .client import session as _sess
+        _sess._default_session = None
+    except ImportError:
+        pass
 
 
 # ---------------------------------------------------------------------------

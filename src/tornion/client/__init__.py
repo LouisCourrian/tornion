@@ -1,4 +1,10 @@
 """HTTP client side: requests-style API that routes through Tor."""
+from .._client_auth import (
+    add_client_auth,
+    default_client_auth_dir,
+    list_client_auth,
+    remove_client_auth,
+)
 from .session import (
     DEFAULT_TIMEOUT,
     OnionSession,
@@ -27,4 +33,9 @@ __all__ = [
     "patch",
     "options",
     "DEFAULT_TIMEOUT",
+    # Client authorization (auth keys to reach restricted hidden services)
+    "add_client_auth",
+    "list_client_auth",
+    "remove_client_auth",
+    "default_client_auth_dir",
 ]

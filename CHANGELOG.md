@@ -78,6 +78,74 @@ _No changes yet._
 
 ---
 
+## [1.2.0] — 2026-05-08
+
+**Tor v3 client authorization.** Hidden services can now restrict who
+is allowed to connect — knowing the `.onion` address alone is no
+longer enough. Authorized clients hold an x25519 private key that
+matches a public key registered with the server; everyone else times
+out trying to connect.
+
+### Added
+
+- **New module `tornion._client_auth`** implementing the v3 client
+  authorization protocol per rend-spec-v3.txt §G. Includes a pure-Python
+  x25519 (RFC 7748 §5) — no `cryptography` or PyNaCl dependency. The
+  implementation is verified against RFC 7748 §6.1 test vectors in the
+  unit tests.
+
+- **Server-side API**, re-exported from `tornion.server`:
+  - `add_authorized_client(key_dir, nickname, public_key=None)` —
+    if `public_key` is omitted, generates a fresh x25519 keypair and
+    returns both halves; the private key must be conveyed to the client.
+    Writes `<key_dir>/authorized_clients/<nickname>.auth` in the
+    `descriptor:x25519:<BASE32>` format tor expects.
+  - `revoke_authorized_client(key_dir, nickname)`
+  - `list_authorized_clients(key_dir)` → `[(nickname, pubkey_b32), ...]`
+  - `generate_client_keypair()` — exposed as a building block.
+
+- **Client-side API**, re-exported from `tornion.client`:
+  - `add_client_auth(onion, private_key)` — registers a `.auth_private`
+    file in the default `ClientOnionAuthDir`
+    (`<data_dir>/client-auth/`).
+  - `remove_client_auth(onion)`, `list_client_auth()`
+  - `default_client_auth_dir()` — exposed for inspection.
+
+- **CLI commands**:
+  - `tornion authorize <key_dir> <nickname>` — generate + add, prints
+    the private key for the operator to give to the client.
+  - `tornion authorize <key_dir> <nickname> --public-key KEY` — add an
+    existing public key the client gave you.
+  - `tornion authorize --list <key_dir>`
+  - `tornion authorize --revoke <nickname> <key_dir>`
+  - `tornion client-auth <onion> <private-key>` — add.
+  - `tornion client-auth --list`
+  - `tornion client-auth --remove <onion>`
+
+- **TorManager** now passes `ClientOnionAuthDir` to the tor subprocess
+  on startup so any registered `.auth_private` files take effect.
+
+### Fixed
+
+- `tornion.shutdown()` now also invalidates the module-level
+  `client._default_session`, which previously kept pointing at the
+  dead tor's SOCKS port and caused subsequent `tornion.client.get(...)`
+  calls to fail with "connection refused".
+
+### Tests
+
+- 19 new unit tests covering: RFC 7748 §6.1 vectors (Alice/Bob keypair
+  derivation + ECDH shared secret), base32 roundtrip, keypair
+  generation, server-side add/list/revoke including duplicate and
+  malformed input cases, onion-URL normalization, client-side
+  add/list/remove, and the module re-export surface.
+- 1 new e2e integration test: an authorized client successfully
+  reaches an HS with `authorized_clients/` populated.
+
+Test count: 64 unit + 2 e2e (was 45 unit + 1 e2e).
+
+---
+
 ## [1.1.0] — 2026-05-08
 
 Ergonomics release: two new CLI subcommands for offline identity

@@ -118,3 +118,74 @@ def test_publish_and_consume_round_trip(tmp_path):
         hs.stop()
         uv.should_exit = True
         uv_thread.join(timeout=5)
+
+
+@pytest.mark.integration
+def test_authorized_client_can_reach_restricted_hs(tmp_path):
+    """End-to-end client-auth: only the holder of the matching private key
+    can reach a hidden service that has authorized_clients configured.
+
+    Steps:
+        1. Start uvicorn on a free local port.
+        2. Generate an x25519 client keypair via tornion's helper.
+        3. Authorize the client on a fresh HS key_dir.
+        4. Register the matching private key on the client side.
+        5. Restart the client tor so the new auth dir is read.
+        6. Publish the HS and assert that the tornion client can reach it.
+    """
+    import tornion
+    from tornion._client_auth import (
+        add_authorized_client, add_client_auth, default_client_auth_dir,
+        remove_client_auth,
+    )
+
+    port = _free_port()
+    config = uvicorn.Config(
+        _ping_app, host="127.0.0.1", port=port, log_level="error",
+    )
+    uv = _ThreadedServer(config)
+    uv_thread = threading.Thread(target=uv.run, daemon=True)
+    uv_thread.start()
+
+    if not _wait_for_port("127.0.0.1", port, deadline_s=10):
+        uv.should_exit = True
+        pytest.fail("uvicorn did not start within 10s")
+
+    key_dir = tmp_path / "restricted-hs"
+    key_dir.mkdir()
+
+    # Generate the keypair + authorize the client.
+    keypair = add_authorized_client(key_dir, "tester")
+    assert keypair.public and keypair.private
+
+    hs = server.HiddenService(
+        target_port=port, key_dir=key_dir, bootstrap_timeout=180,
+    )
+
+    # Make sure we tidy our client-auth dir on exit (it's persistent
+    # under the user data dir).
+    onion_url_holder = {}
+
+    try:
+        onion_url = hs.start()
+        onion_url_holder["url"] = onion_url
+
+        # Register the matching private key on the client side, then
+        # force-restart any existing tornion-managed client tor so it
+        # rereads the auth dir on next request.
+        add_client_auth(onion_url, keypair.private)
+        tornion.shutdown()
+
+        r = client.get(f"{onion_url}/ping", timeout=180)
+        assert r.status_code == 200
+        assert r.json() == {"message": "pong"}
+    finally:
+        # Clean up persistent state so subsequent runs of this test
+        # (or the simple round-trip test) are not affected.
+        url = onion_url_holder.get("url")
+        if url:
+            remove_client_auth(url)
+        tornion.shutdown()
+        hs.stop()
+        uv.should_exit = True
+        uv_thread.join(timeout=5)

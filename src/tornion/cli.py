@@ -137,6 +137,118 @@ def _cmd_onion(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_authorize(args: argparse.Namespace) -> int:
+    """Manage server-side client authorizations (who can reach this HS)."""
+    from . import _client_auth
+
+    key_dir = Path(args.key_dir)
+
+    if args.list:
+        try:
+            clients = _client_auth.list_authorized_clients(key_dir)
+        except OSError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if not clients:
+            print(f"(no authorized clients for {key_dir})")
+            return 0
+        print(f"Authorized clients for {key_dir}:")
+        for nickname, pubkey in clients:
+            print(f"  - {nickname:<20s} {pubkey}")
+        return 0
+
+    if args.revoke:
+        try:
+            removed = _client_auth.revoke_authorized_client(key_dir, args.revoke)
+        except (ValueError, OSError) as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if removed:
+            print(f"✅ revoked {args.revoke!r} from {key_dir}")
+        else:
+            print(f"(no client {args.revoke!r} was authorized for {key_dir})")
+        return 0
+
+    # Default action: add a new authorization.
+    if not args.nickname:
+        print(
+            "❌ Specify a nickname to authorize, or use --list / --revoke",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        keypair = _client_auth.add_authorized_client(
+            key_dir, args.nickname, public_key=args.public_key,
+        )
+    except (ValueError, FileNotFoundError, OSError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+
+    print(f"✅ authorized {args.nickname!r} on {key_dir}")
+    if keypair.private:
+        # We generated the pair. The private key MUST reach the client; we
+        # only print it here, never to disk.
+        print()
+        print(f"   Give this PRIVATE key to {args.nickname} (one-time display):")
+        print(f"       {keypair.private}")
+        print()
+        print(f"   On the client, register it with:")
+        print(f"       tornion client-auth add <this-onion-url> {keypair.private}")
+    else:
+        print(f"   (you supplied the public key; the client already has the private)")
+    return 0
+
+
+def _cmd_client_auth(args: argparse.Namespace) -> int:
+    """Manage client-side auth keys (private keys for restricted hidden services)."""
+    from . import _client_auth
+
+    if args.list:
+        items = _client_auth.list_client_auth()
+        if not items:
+            print(f"(no registered client-auth keys in "
+                  f"{_client_auth.default_client_auth_dir()})")
+            return 0
+        print(f"Registered client-auth keys "
+              f"({_client_auth.default_client_auth_dir()}):")
+        for stem in items:
+            print(f"  - {stem}.onion")
+        return 0
+
+    if args.remove:
+        try:
+            removed = _client_auth.remove_client_auth(args.remove)
+        except ValueError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if removed:
+            print(f"✅ removed client-auth for {args.remove}")
+            print(f"   (restart tor for the change to take effect: `tornion info`")
+            print(f"    will start a fresh tor on next use)")
+        else:
+            print(f"(no client-auth registered for {args.remove})")
+        return 0
+
+    # Default action: add.
+    if not args.onion or not args.private_key:
+        print(
+            "❌ Specify <onion> <private_key> to add, or use --list / --remove",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        path = _client_auth.add_client_auth(args.onion, args.private_key)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    print(f"✅ wrote {path}")
+    print(f"   tor reads this on startup. If a managed tor is already running,")
+    print(f"   it will pick up the new auth only after a restart.")
+    return 0
+
+
 def _cmd_info(args: argparse.Namespace) -> int:
     import os
     from . import _tor
@@ -252,6 +364,58 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory containing hostname / hs_ed25519_public_key / hs_ed25519_secret_key",
     )
     p_onion.set_defaults(func=_cmd_onion)
+
+    p_auth = sub.add_parser(
+        "authorize",
+        help="Manage server-side authorized clients (who can reach this HS)",
+    )
+    p_auth.add_argument(
+        "key_dir",
+        help="Directory holding the HS identity (with hs_ed25519_secret_key)",
+    )
+    p_auth.add_argument(
+        "nickname",
+        nargs="?",
+        help="Arbitrary label for the new client (e.g. 'alice', 'phone')",
+    )
+    p_auth.add_argument(
+        "--public-key",
+        help="Client's x25519 public key (base32, 52 chars). "
+             "If omitted, tornion generates a fresh keypair and prints the private.",
+    )
+    p_auth.add_argument(
+        "--list", action="store_true",
+        help="List currently authorized clients for this key_dir",
+    )
+    p_auth.add_argument(
+        "--revoke", metavar="NICKNAME",
+        help="Revoke the given client's authorization",
+    )
+    p_auth.set_defaults(func=_cmd_authorize)
+
+    p_cauth = sub.add_parser(
+        "client-auth",
+        help="Manage client-side auth keys for restricted hidden services",
+    )
+    p_cauth.add_argument(
+        "onion",
+        nargs="?",
+        help="The .onion address (with or without 'http://' / '.onion' / path)",
+    )
+    p_cauth.add_argument(
+        "private_key",
+        nargs="?",
+        help="Client's x25519 private key in base32 (52 chars)",
+    )
+    p_cauth.add_argument(
+        "--list", action="store_true",
+        help="List all .onion addresses with a registered client-auth key",
+    )
+    p_cauth.add_argument(
+        "--remove", metavar="ONION",
+        help="Forget the registered client-auth key for the given .onion",
+    )
+    p_cauth.set_defaults(func=_cmd_client_auth)
 
     args = parser.parse_args(argv)
 

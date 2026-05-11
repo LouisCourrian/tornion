@@ -188,9 +188,15 @@ Quick wins (shipped in 1.1.0):
       Resolution order in `_resolve_key_dir`:
       `explicit arg > $TORNION_KEY_DIR > <data>/hs/<app_name>/`.
 
+Shipped in 1.2.0:
+
+- [x] **Tor v3 client authorization** (restrict who can reach your HS).
+      Pure-Python x25519 (RFC 7748, vectors checked), server-side
+      `authorize` CLI, client-side `client-auth` CLI, full e2e
+      integration test. See the *Client authorization* section above.
+
 Deferred to 1.x:
 
-- [ ] Tor v3 client authorization (restrict who can reach your HS).
 - [ ] Async client (`httpx.AsyncClient`-style) alongside the sync one.
 
 ## 📄 License
