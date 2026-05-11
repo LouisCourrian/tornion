@@ -171,17 +171,22 @@ Required for `1.0.0` (✅ all shipped):
       [CHANGELOG.md](CHANGELOG.md) — Keep-a-Changelog format, with an
       explicit policy at the top stating what counts as MAJOR / MINOR
       / PATCH and the deprecation window.
-- [x] **Publish `1.0.0` to PyPI.** Trusted-publisher GitHub Actions
-      workflow lives at [.github/workflows/publish.yml](.github/workflows/publish.yml);
-      releases are triggered by pushing a `v*` tag.
+- [x] **Publish to PyPI.** Auto-release workflow at
+      [.github/workflows/release.yml](.github/workflows/release.yml):
+      on `v*.*.*` tag push, extracts the matching CHANGELOG section,
+      creates the GitHub Release with it as the body, then publishes
+      to PyPI via OIDC trusted publisher.
 
-Quick wins (small, high-value):
+Quick wins (shipped in 1.1.0):
 
-- [ ] `tornion keygen [--out DIR]` — generate a fresh
+- [x] **`tornion keygen [--out DIR]`** — generates a fresh
       `hs_ed25519_secret_key` without spinning up tor.
-- [ ] `tornion onion <key_dir>` — print the `.onion` address derived
-      from an existing key dir, offline.
-- [ ] `TORNION_KEY_DIR` env var, symmetric to `TORNION_TOR_PATH`.
+- [x] **`tornion onion <key_dir>`** — prints the `.onion` address from
+      an existing key dir, fully offline (reads `hostname` or derives
+      from `hs_ed25519_public_key` via SHA3-256 + base32).
+- [x] **`TORNION_KEY_DIR`** env var, symmetric to `TORNION_TOR_PATH`.
+      Resolution order in `_resolve_key_dir`:
+      `explicit arg > $TORNION_KEY_DIR > <data>/hs/<app_name>/`.
 
 Deferred to 1.x:
 
