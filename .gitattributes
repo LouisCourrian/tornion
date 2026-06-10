@@ -1,0 +1,5 @@
+# PGP keys, detached signatures, and signed checksum files are verified
+# byte-for-byte. Git must NEVER convert their line endings (a CRLF rewrite on
+# a Windows checkout would change the bytes and break signature verification).
+*.asc -text
+tests/fixtures/sha256sums-* -text

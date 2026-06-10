@@ -180,6 +180,7 @@ class TorManager:
         verbose: bool = False,
         extra_config: Optional[dict] = None,
         use_existing: bool = True,
+        auto_update: Optional[bool] = None,
     ) -> None:
         if self.is_running:
             return
@@ -200,7 +201,9 @@ class TorManager:
                 return
 
         port = socks_port if socks_port is not None else _free_port()
-        binary = _binary.find_tor_binary(auto_install=auto_install)
+        binary = _binary.find_tor_binary(
+            auto_install=auto_install, auto_update=auto_update
+        )
         self._tor_binary = binary
 
         data_dir = _binary.cache_dir() / "tor-data" / f"client-{port}"
@@ -322,6 +325,7 @@ def launch_tor_for_hidden_service(
     auto_install: bool = True,
     verbose: bool = False,
     onion_port: int = 80,
+    auto_update: Optional[bool] = None,
 ) -> Tuple[object, str]:
     """Spawn a tor subprocess configured to host a hidden service.
 
@@ -344,7 +348,7 @@ def launch_tor_for_hidden_service(
     if os.name == "posix":
         os.chmod(key_dir, 0o700)
 
-    binary = _binary.find_tor_binary(auto_install=auto_install)
+    binary = _binary.find_tor_binary(auto_install=auto_install, auto_update=auto_update)
 
     # Per-HS DataDirectory based on a *stable* hash of the key_dir path.
     # Using builtin hash() here would pick up Python's per-process

@@ -78,6 +78,67 @@ _No changes yet._
 
 ---
 
+## [1.4.0] — 2026-06-10
+
+**Secure tor auto-update.** Opt-in: instead of the hard-pinned bundle,
+keep tornion's managed tor on the latest stable Tor Expert Bundle —
+authenticated against the Tor Project's PGP signature, not HTTPS alone.
+Off by default; the pinned `DEFAULT_TOR_VERSION` remains the guaranteed
+fallback and auto-update can never break startup.
+
+### Added
+
+- **New module `tornion._update`** (lazy, opt-in): discovers the latest
+  **stable** version from `archive.torproject.org` (alphas ignored),
+  downloads `sha256sums-signed-build.txt` + its detached `.asc`,
+  **verifies the PGP signature** against the embedded Tor Browser build
+  signing key, and extracts the host platform's SHA-256 from the *signed*
+  sums. The hash is then re-verified by `install_tor()` before extraction,
+  so a version tornion never shipped is still authenticated by Tor's own
+  signature. Every entry point is failure-tolerant (offline / parse error /
+  bad signature → fall back to cached/pinned).
+
+- **Embedded signing key** `tornion/assets/tor-signing-key.asc` (Tor
+  Browser Developers, fingerprint `EF6E286D…93298290`). Verification is
+  pure-Python via the new `[autoupdate]` extra (PGPy) — no system `gpg`.
+
+- **`auto_update` option** threaded through `client.Session`,
+  `client.AsyncSession`, `server.serve()`, `server.HiddenService`, and
+  `find_tor_binary()`. Resolution: explicit arg > `$TORNION_AUTO_UPDATE`
+  (`"1"` enables) > off.
+
+- **`TORNION_AUTO_UPDATE` env var** and a **`.tornion-version`** cache
+  marker so an already-current launch does a cheap ~6 KB signed-sums check
+  and skips the multi-MB download.
+
+- **CLI**: `tornion update [--force]` (one-shot check + update),
+  `--auto-update` flags on `tornion get` / `tornion serve`, and `tornion
+  info` now shows the cached tor version and auto-update availability.
+
+- **`tornion.installed_tor_version()`** — public helper returning the
+  cached bundle's version (from the marker), or None.
+
+### Fixed
+
+- **`_safe_extract_tar` now rejects POSIX-absolute member paths on Windows.**
+  The previous guard relied on `os.path.isabs`, which returns False for a
+  leading-slash path like `/etc/passwd` on Windows, so such a member could
+  slip past on that platform. A new `_is_absolute_member` check rejects both
+  POSIX (`/…`, `\…`) and Windows (`C:\…`) absolute paths regardless of host
+  OS. Hardens extraction of the downloaded Tor Expert Bundle against a
+  tampered archive.
+
+### Tests
+
+- New `tests/test_update.py` (23 tests): version parsing, latest-version
+  discovery, hash extraction, and **real PGP verification against the
+  embedded key** using captured fixtures — valid signature passes, a
+  tampered sums file and a garbage signature both fail. Plus the
+  `find_tor_binary`/`_try_auto_update` plumbing (missing-extra fallback,
+  skip-when-current, install-when-newer). All offline.
+
+---
+
 ## [1.3.0] — 2026-06-10
 
 **Async client.** A `httpx.AsyncClient`-style counterpart to the sync

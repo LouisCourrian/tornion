@@ -10,6 +10,7 @@ Resolution priority when looking for a usable tor binary:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import platform
 import shutil
@@ -21,6 +22,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .exceptions import TorBinaryNotFound
+
+log = logging.getLogger("tornion")
+
+#: Filename of the marker tornion writes into its tor cache recording which
+#: bundle version is currently installed. Lets auto-update skip a re-download
+#: when the cache is already on the latest version.
+_VERSION_MARKER = ".tornion-version"
 
 #: Default Tor Expert Bundle version downloaded by ``install_tor()``.
 #: Bumped when a new stable line is published.
@@ -62,32 +70,48 @@ def _hash_file(path: Path, *, chunk_size: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def _is_absolute_member(name: str) -> bool:
+    """True if a tar member name is absolute by POSIX *or* Windows rules.
+
+    ``os.path.isabs`` is platform-dependent and unreliable here: on Windows
+    it returns False for a POSIX-absolute ``/etc/passwd`` (no drive letter),
+    so a leading-slash member would slip past a naive guard. We check both
+    conventions explicitly, independent of the host OS:
+
+        - leading ``/`` or ``\\``          → POSIX-absolute / UNC / drive-relative
+        - ``X:`` drive prefix              → Windows drive-absolute (``C:\\foo``)
+    """
+    if name.startswith(("/", "\\")):
+        return True
+    # Drive-letter prefix like ``C:`` or ``C:\foo`` (also catches ``C:foo``).
+    if len(name) >= 2 and name[1] == ":" and name[0].isalpha():
+        return True
+    return False
+
+
 def _safe_extract_tar(tar: tarfile.TarFile, target_dir: Path) -> None:
     """Extract ``tar`` into ``target_dir``, rejecting unsafe members.
 
-    On Python 3.12+ we delegate to the stdlib's ``filter="data"`` which
-    implements PEP 706 — the canonical safe extraction profile.
-
-    On Python 3.9-3.11 the filter parameter doesn't exist, so we
-    pre-validate every member and reject anything outside the data
-    profile:
+    Every member is pre-validated regardless of platform or Python version,
+    and anything outside the PEP 706 "data" profile is refused:
 
         - symlinks, hardlinks, devices, FIFOs (only files and dirs OK)
         - absolute paths (Unix ``/foo`` or Windows ``C:\\foo``)
         - paths that escape ``target_dir`` via ``..`` after normalization
+
+    We validate *before* extracting rather than relying on the stdlib's
+    ``filter="data"`` alone: on Windows + Python 3.12 that filter silently
+    *strips* a leading ``/`` (turning ``/etc/passwd`` into ``etc/passwd``)
+    instead of raising, and ``os.path.isabs`` doesn't recognise a POSIX
+    absolute path as absolute. So the explicit guard below is what actually
+    enforces rejection cross-platform; ``filter="data"`` (when available) is
+    kept on top purely as defense-in-depth.
 
     A malicious Tor Expert Bundle would have to defeat the SHA-256 pin
     *first* to reach this code path, but defense-in-depth is the whole
     point of a Tor toolchain.
     """
     target_resolved = target_dir.resolve()
-
-    # Fast path: Python 3.12+ does this for us.
-    try:
-        tar.extractall(target_dir, filter="data")
-        return
-    except TypeError:
-        pass  # filter= unsupported; fall through to manual validation
 
     for member in tar.getmembers():
         # Only allow regular files and directories.
@@ -97,16 +121,17 @@ def _safe_extract_tar(tar: tarfile.TarFile, target_dir: Path) -> None:
                 f"({member.name!r}, type={member.type!r}); aborting extraction"
             )
 
-        # Reject absolute paths (POSIX or Windows-style).
+        # Reject absolute paths (POSIX or Windows-style), independent of host OS.
         name = member.name
-        if name.startswith(("/", "\\")) or (len(name) >= 2 and name[1] == ":"):
+        if _is_absolute_member(name):
             raise TorBinaryNotFound(
                 f"Tor Expert Bundle has absolute member path {name!r}; "
                 f"aborting extraction"
             )
 
         # Reject path traversal — resolve and check it stays under target.
-        resolved = (target_resolved / name).resolve()
+        # Normalize backslashes so a Windows-style ``..\\..`` is caught on POSIX too.
+        resolved = (target_resolved / name.replace("\\", "/")).resolve()
         try:
             resolved.relative_to(target_resolved)
         except ValueError:
@@ -115,7 +140,12 @@ def _safe_extract_tar(tar: tarfile.TarFile, target_dir: Path) -> None:
                 f"{target_resolved}; aborting extraction"
             )
 
-    tar.extractall(target_dir)
+    # Members are validated. Prefer the stdlib data filter (Python 3.12+) as
+    # an extra layer; fall back to a plain extract on 3.9-3.11.
+    try:
+        tar.extractall(target_dir, filter="data")
+    except TypeError:
+        tar.extractall(target_dir)
 
 
 def cache_dir() -> Path:
@@ -185,6 +215,29 @@ def installed_tor_path() -> Optional[Path]:
     return p if p.exists() else None
 
 
+def _write_version_marker(target_dir: Path, version: str) -> None:
+    try:
+        (target_dir / _VERSION_MARKER).write_text(version.strip(), encoding="ascii")
+    except OSError as e:
+        log.warning("could not write version marker (%s)", e)
+
+
+def installed_tor_version() -> Optional[str]:
+    """Return the version of the tor binary in tornion's cache, or None.
+
+    Reads the ``.tornion-version`` marker written by :func:`install_tor`. A
+    cached binary without a marker (e.g. installed by an older tornion)
+    returns None, which auto-update treats as "unknown → refresh".
+    """
+    if installed_tor_path() is None:
+        return None
+    marker = cache_dir() / "tor" / _VERSION_MARKER
+    try:
+        return marker.read_text(encoding="ascii").strip() or None
+    except OSError:
+        return None
+
+
 def _tor_browser_locations() -> list[Path]:
     """Return possible Tor Browser tor binary paths for the current OS."""
     paths: list[Path] = []
@@ -202,16 +255,76 @@ def _tor_browser_locations() -> list[Path]:
     return paths
 
 
+def _resolve_auto_update(auto_update: Optional[bool]) -> bool:
+    """Resolve the effective auto-update flag: explicit arg > env var > False."""
+    if auto_update is not None:
+        return auto_update
+    return os.environ.get("TORNION_AUTO_UPDATE") == "1"
+
+
+def _try_auto_update(progress: bool = False) -> Optional[Path]:
+    """Best-effort: ensure tornion's cached tor is the latest verified version.
+
+    Returns the cached binary path if it's present (already-latest or freshly
+    updated), or None if there's nothing cached and updating failed. Never
+    raises — any failure falls back to the normal resolution order so a
+    flaky network or a missing extra can't break ``find_tor_binary``.
+    """
+    try:
+        from . import _update
+    except ImportError:
+        log.warning(
+            "auto-update requested but the [autoupdate] extra isn't installed. "
+            "Run `pip install tornion[autoupdate]`. Falling back to cached/pinned tor."
+        )
+        return installed_tor_path()
+
+    try:
+        suffix = _detect_platform_suffix()
+    except TorBinaryNotFound:
+        return installed_tor_path()
+
+    resolved = _update.resolve_latest(TOR_DOWNLOAD_BASE, suffix)
+    if resolved is None:
+        # Offline, signature failure, etc. — keep whatever we already have.
+        return installed_tor_path()
+
+    latest_version, latest_sha = resolved
+    cached = installed_tor_version()
+    if cached is not None and _update.version_tuple(cached) is not None and (
+        _update.version_tuple(latest_version) or (0, 0, 0)
+    ) <= _update.version_tuple(cached):
+        # Cache is already at or beyond the latest stable — nothing to do.
+        return installed_tor_path()
+
+    log.info(
+        "auto-update: installing verified Tor %s (cached: %s)",
+        latest_version, cached or "none",
+    )
+    try:
+        return install_tor(
+            version=latest_version, sha256=latest_sha, force=True, progress=progress
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("auto-update install failed (%s); falling back", e)
+        return installed_tor_path()
+
+
 def find_tor_binary(
     auto_install: bool = True,
     version: str = DEFAULT_TOR_VERSION,
+    auto_update: Optional[bool] = None,
 ) -> str:
-    """Locate a usable tor binary, optionally auto-installing one.
+    """Locate a usable tor binary, optionally auto-installing/updating one.
 
     Args:
         auto_install: If True (default), download the Tor Expert Bundle into
             the user cache when no system tor is found.
         version: Tor Expert Bundle version to fetch when auto-installing.
+        auto_update: If True, keep tornion's cached tor on the latest stable
+            version (PGP-verified) on every call, preferring it over a system
+            tor. Requires ``pip install tornion[autoupdate]``. Defaults to
+            None, which reads ``$TORNION_AUTO_UPDATE`` (``"1"`` enables it).
 
     Returns:
         Absolute filesystem path to a tor binary.
@@ -223,6 +336,13 @@ def find_tor_binary(
     if env_path := os.environ.get("TORNION_TOR_PATH"):
         if Path(env_path).exists():
             return env_path
+
+    # When opted in, a freshly-verified managed tor takes precedence over a
+    # system tor: the user explicitly asked to always run the latest.
+    if _resolve_auto_update(auto_update):
+        updated = _try_auto_update()
+        if updated is not None:
+            return str(updated)
 
     if p := installed_tor_path():
         return str(p)
@@ -362,6 +482,9 @@ def install_tor(
 
     if sys.platform != "win32":
         os.chmod(target_bin, 0o755)
+
+    # Record which version is now cached so auto-update can compare cheaply.
+    _write_version_marker(target_dir, version)
 
     if progress:
         size_mb = target_bin.stat().st_size / (1024 * 1024)

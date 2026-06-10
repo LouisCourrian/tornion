@@ -114,6 +114,7 @@ class HiddenService:
         auto_install: bool = True,
         verbose: bool = False,
         onion_port: int = 80,
+        auto_update: Optional[bool] = None,
     ) -> None:
         self.target_host = target_host
         self.target_port = target_port
@@ -122,6 +123,7 @@ class HiddenService:
         self.auto_install = auto_install
         self.verbose = verbose
         self.onion_port = onion_port
+        self.auto_update = auto_update
 
         self._proc = None
         self._onion_url: Optional[str] = None
@@ -153,6 +155,7 @@ class HiddenService:
             auto_install=self.auto_install,
             verbose=self.verbose,
             onion_port=self.onion_port,
+            auto_update=self.auto_update,
         )
         self._proc = proc
         self._onion_url = url
@@ -185,6 +188,7 @@ def serve(
     app_name: Optional[str] = None,
     bootstrap_timeout: int = 90,
     auto_install: bool = True,
+    auto_update: Optional[bool] = None,
     log_level: str = "warning",
     server_kwargs: Optional[dict] = None,
 ) -> None:
@@ -211,6 +215,9 @@ def serve(
             for full control of where your identity lives.
         bootstrap_timeout: Max seconds to wait for tor bootstrap.
         auto_install: Auto-download tor if missing.
+        auto_update: Keep tornion's managed tor on the latest stable
+            (PGP-verified) version. Requires ``pip install tornion[autoupdate]``.
+            Defaults to None, which reads ``$TORNION_AUTO_UPDATE``.
         log_level: uvicorn log level.
         server_kwargs: Extra kwargs forwarded to ``uvicorn.run``.
 
@@ -270,6 +277,7 @@ def serve(
         app_name=app_name,
         bootstrap_timeout=bootstrap_timeout,
         auto_install=auto_install,
+        auto_update=auto_update,
     )
 
     hs.start()

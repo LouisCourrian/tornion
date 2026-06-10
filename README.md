@@ -37,6 +37,7 @@ SOCKS proxy or the hidden service, and tears it down on exit.
 - 🚀 **Zero-config server** — `server.serve(app)` takes any ASGI **or** WSGI app
 - 🧠 **Smart tor reuse** — auto-detects an already-running tor on `:9050`/`:9150`
 - 📦 **Auto-install tor** — downloads the official Tor Expert Bundle on first use
+- 🔄 **Secure auto-update** — opt-in: always run the latest tor, PGP-verified against the Tor Project's signing key
 - 🎯 **Framework-agnostic** — FastAPI, Flask, Starlette, Django, Quart, Litestar…
 - 🔑 **Persistent `.onion`** — the address stays stable across restarts
 - 🪶 **Lightweight client** — server features are opt-in via `pip install tornion[server]`
@@ -52,6 +53,9 @@ pip install tornion[async]
 
 # With server features
 pip install tornion[server]
+
+# With secure tor auto-update (PGP-verified latest)
+pip install tornion[autoupdate]
 ```
 
 ## 🚀 Quick start
@@ -112,6 +116,7 @@ server.serve(app)
 
 ```bash
 tornion install-tor              # pre-download the tor binary
+tornion update                   # update tor to the latest PGP-verified version
 tornion serve myapp:app          # uvicorn-style: run an app on a .onion
 tornion get http://xxx.onion/    # one-shot HTTP request
 tornion info                     # diagnostic: where's tor, what's installed
@@ -163,4 +168,6 @@ MIT — see [LICENSE](LICENSE).
 
 `tornion` is an independent project, not affiliated with the Tor Project.
 The bundled `tor` binary comes from [torproject.org](https://torproject.org/)
-under 3-clause BSD.
+under 3-clause BSD. The package embeds the public Tor Browser build signing
+key (`tornion/assets/tor-signing-key.asc`, fingerprint
+`EF6E286D…93298290`) solely to verify auto-update downloads.

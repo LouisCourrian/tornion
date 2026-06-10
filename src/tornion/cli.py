@@ -27,9 +27,56 @@ def _cmd_install_tor(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_update(args: argparse.Namespace) -> int:
+    """Update the cached tor to the latest PGP-verified Tor Expert Bundle."""
+    try:
+        from . import _update
+    except ImportError:
+        print(
+            "❌ auto-update requires the [autoupdate] extra:\n"
+            "    pip install tornion[autoupdate]",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        suffix = _binary._detect_platform_suffix()
+    except OnionError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+
+    print("🔎 checking torproject.org for the latest verified Tor Expert Bundle...")
+    resolved = _update.resolve_latest(_binary.TOR_DOWNLOAD_BASE, suffix)
+    if resolved is None:
+        print(
+            "❌ could not resolve a verified latest version "
+            "(offline, or PGP signature check failed).",
+            file=sys.stderr,
+        )
+        return 1
+
+    version, sha = resolved
+    cached = _binary.installed_tor_version()
+    cached_v = _update.version_tuple(cached) if cached else None
+    latest_v = _update.version_tuple(version) or (0, 0, 0)
+    if not args.force and cached_v is not None and latest_v <= cached_v:
+        print(f"✅ already up to date: cached tor {cached} (latest stable {version})")
+        return 0
+
+    try:
+        path = _binary.install_tor(version=version, sha256=sha, force=True)
+    except OnionError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    print(f"\n✅ updated to PGP-verified Tor {version}\n   {path}")
+    return 0
+
+
 def _cmd_get(args: argparse.Namespace) -> int:
     try:
-        with _session.OnionSession(timeout=args.timeout) as s:
+        with _session.OnionSession(
+            timeout=args.timeout, auto_update=args.auto_update
+        ) as s:
             kwargs = {}
             if args.data is not None:
                 kwargs["data"] = args.data
@@ -88,6 +135,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             key_dir=args.key_dir,
             app_name=args.name or attr,
             bootstrap_timeout=args.bootstrap_timeout,
+            auto_update=args.auto_update,
             log_level=args.log_level,
         )
         return 0
@@ -263,7 +311,9 @@ def _cmd_info(args: argparse.Namespace) -> int:
     p = _binary.installed_tor_path()
     if p:
         size_mb = p.stat().st_size / (1024 * 1024)
-        print(f"  bundled tor       : {p} ({size_mb:.1f} MB)")
+        cached_ver = _binary.installed_tor_version()
+        ver_str = f" v{cached_ver}" if cached_ver else " (version unknown)"
+        print(f"  bundled tor       : {p}{ver_str} ({size_mb:.1f} MB)")
     else:
         print("  bundled tor       : (not installed)")
 
@@ -287,7 +337,16 @@ def _cmd_info(args: argparse.Namespace) -> int:
     except ImportError:
         print(f"  server extras     : (not installed — run `pip install tornion[server]`)")
 
-    print(f"  default version   : {_binary.DEFAULT_TOR_VERSION}")
+    # auto-update extras
+    auto_on = os.environ.get("TORNION_AUTO_UPDATE") == "1"
+    try:
+        import pgpy  # noqa: F401
+        state = "on" if auto_on else "off"
+        print(f"  auto-update       : ✓ available (PGPy ready), TORNION_AUTO_UPDATE={state}")
+    except ImportError:
+        print(f"  auto-update       : (not installed — run `pip install tornion[autoupdate]`)")
+
+    print(f"  pinned version    : {_binary.DEFAULT_TOR_VERSION}")
     return 0
 
 
@@ -314,6 +373,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_install.set_defaults(func=_cmd_install_tor)
 
+    p_update = sub.add_parser(
+        "update",
+        help="Update the cached tor to the latest PGP-verified version "
+             "(needs the [autoupdate] extra)",
+    )
+    p_update.add_argument(
+        "--force", action="store_true",
+        help="Reinstall even if the cache is already on the latest version",
+    )
+    p_update.set_defaults(func=_cmd_update)
+
     p_get = sub.add_parser("get", help="Make a single HTTP request to a .onion URL")
     p_get.add_argument("url")
     p_get.add_argument("-X", "--method", default="GET")
@@ -321,6 +391,10 @@ def main(argv: list[str] | None = None) -> int:
     p_get.add_argument("--data")
     p_get.add_argument("--json", action="store_true")
     p_get.add_argument("--timeout", type=int, default=_session.DEFAULT_TIMEOUT)
+    p_get.add_argument(
+        "--auto-update", action="store_true", default=None,
+        help="Keep tor on the latest PGP-verified version before the request",
+    )
     p_get.set_defaults(func=_cmd_get)
 
     p_serve = sub.add_parser(
@@ -331,6 +405,10 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--key-dir", help="Directory to store the .onion key")
     p_serve.add_argument("--name", help="Slug used to derive default key dir")
     p_serve.add_argument("--bootstrap-timeout", type=int, default=90)
+    p_serve.add_argument(
+        "--auto-update", action="store_true", default=None,
+        help="Keep tor on the latest PGP-verified version (needs [autoupdate])",
+    )
     p_serve.add_argument("--log-level", default="warning",
                          choices=["critical", "error", "warning", "info", "debug"])
     p_serve.set_defaults(func=_cmd_serve)

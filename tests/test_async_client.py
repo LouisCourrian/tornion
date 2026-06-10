@@ -86,6 +86,7 @@ async def test_session_construction_passes_tor_options(fake_tor):
             "auto_install": False,
             "bootstrap_timeout": 42,
             "use_existing": False,
+            "auto_update": None,
         }
         assert s._retries == 7
         assert isinstance(s, httpx.AsyncClient)

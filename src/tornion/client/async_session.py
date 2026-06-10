@@ -46,6 +46,9 @@ class AsyncOnionSession(httpx.AsyncClient):
         use_existing: If True (default), reuse an already-running tor SOCKS
             proxy detected on 9050/9150/$TORNION_SOCKS_PORT instead of
             spawning a new one.
+        auto_update: If True, keep tornion's managed tor on the latest stable
+            (PGP-verified) version. Requires ``pip install tornion[autoupdate]``.
+            Defaults to None, which reads ``$TORNION_AUTO_UPDATE``.
         **httpx_kwargs: Any other keyword argument forwarded to
             ``httpx.AsyncClient`` (``headers``, ``auth``, ``limits``, …).
 
@@ -64,12 +67,14 @@ class AsyncOnionSession(httpx.AsyncClient):
         bootstrap_timeout: int = 90,
         retries: int = 3,
         use_existing: bool = True,
+        auto_update: Optional[bool] = None,
         **httpx_kwargs: Any,
     ) -> None:
         tor = _tor.get_tor(
             auto_install=auto_install,
             bootstrap_timeout=bootstrap_timeout,
             use_existing=use_existing,
+            auto_update=auto_update,
         )
 
         proxy = f"socks5h://127.0.0.1:{tor.socks_port}"

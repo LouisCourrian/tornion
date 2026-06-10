@@ -34,6 +34,7 @@ from ._binary import (
     find_tor_binary,
     install_tor,
     installed_tor_path,
+    installed_tor_version,
 )
 
 # --- Tor process detection (shared) ---
@@ -65,6 +66,7 @@ __all__ = [
     "install_tor",
     "find_tor_binary",
     "installed_tor_path",
+    "installed_tor_version",
     "cache_dir",
     "data_dir",
     "detect_running_tor",
