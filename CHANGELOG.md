@@ -78,6 +78,33 @@ _No changes yet._
 
 ---
 
+## [1.4.1] — 2026-06-10
+
+Maintenance patch: CI, Python 3.13 compatibility for the auto-update
+extra, and a typing marker. No API changes.
+
+### Fixed
+
+- **`tornion[autoupdate]` now works on Python 3.13.** PGPy imports the
+  stdlib `imghdr` module (removed in 3.13 per PEP 594), so `import pgpy`
+  raised `ModuleNotFoundError` there, silently disabling auto-update on
+  3.13 even though it's an advertised supported version. `tornion._update`
+  now installs a minimal no-op `imghdr` stub before importing pgpy (the
+  module is only used by pgpy to sniff image types in user-attribute
+  packets — irrelevant to signature verification). No-op on older Pythons.
+
+### Added
+
+- **`py.typed` marker (PEP 561).** The package already ships type hints;
+  this lets downstream `mypy`/`pyright` users actually consume them.
+
+- **CI test workflow** (`.github/workflows/test.yml`): runs the test suite
+  on push and pull request across Linux/Windows/macOS and Python 3.9 /
+  3.11 / 3.13. Previously only the release workflow existed, so tests ran
+  only locally.
+
+---
+
 ## [1.4.0] — 2026-06-10
 
 **Secure tor auto-update.** Opt-in: instead of the hard-pinned bundle,

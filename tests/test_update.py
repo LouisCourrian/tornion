@@ -103,6 +103,22 @@ def test_verify_sums_garbage_signature_fails():
     assert _update.verify_sums(SUMS, b"not a real signature") is False
 
 
+def test_imghdr_shim_for_py313(monkeypatch):
+    """On Python 3.13 (no stdlib imghdr), the shim must let pgpy import.
+
+    Simulated by poisoning the import so `import imghdr` raises the way it
+    does on 3.13, then asserting the shim installs a usable stub.
+    """
+    monkeypatch.delitem(sys.modules, "imghdr", raising=False)
+    monkeypatch.setitem(sys.modules, "imghdr", None)  # → ModuleNotFoundError
+
+    _update._ensure_pgp_importable()
+
+    import imghdr  # now resolves to the stub
+    assert callable(imghdr.what)
+    assert imghdr.what("anything") is None
+
+
 # ---------------------------------------------------------------------------
 # resolve_latest
 # ---------------------------------------------------------------------------

@@ -28,11 +28,31 @@ from __future__ import annotations
 
 import logging
 import ssl
+import sys
+import types
 import urllib.request
 from importlib import resources
 from typing import Optional, Tuple
 
 log = logging.getLogger("tornion")
+
+
+def _ensure_pgp_importable() -> None:
+    """Make ``import pgpy`` work on Python 3.13+, which removed ``imghdr``.
+
+    PGPy imports the stdlib ``imghdr`` module at load time (only to sniff
+    image types in OpenPGP user-attribute packets — irrelevant to signature
+    verification). ``imghdr`` was removed in Python 3.13 (PEP 594), so
+    ``import pgpy`` raises ``ModuleNotFoundError`` there. We install a tiny
+    no-op stub before importing pgpy so the [autoupdate] extra keeps working
+    on 3.13. On older Pythons the real module imports and this is a no-op.
+    """
+    try:
+        import imghdr  # noqa: F401
+    except ImportError:
+        stub = types.ModuleType("imghdr")
+        stub.what = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+        sys.modules["imghdr"] = stub
 
 #: Expected fingerprint of the embedded Tor Browser build signing key. Checked
 #: at load time so a swapped-out asset can't silently weaken verification.
@@ -108,6 +128,7 @@ def verify_sums(sums: bytes, sig: bytes) -> bool:
     try:
         import warnings
 
+        _ensure_pgp_importable()
         import pgpy
 
         with warnings.catch_warnings():
