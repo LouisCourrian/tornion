@@ -41,18 +41,25 @@ server = [
     "uvicorn[standard]>=0.30.0",
     "asgiref>=3.7.0",
 ]
+# Async client (httpx.AsyncClient-style API over the same Tor proxy)
+async = [
+    "httpx[socks]>=0.27",
+]
 # Convenience: everything
 all = [
     "uvicorn[standard]>=0.30.0",
     "asgiref>=3.7.0",
+    "httpx[socks]>=0.27",
 ]
 # Development
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.10",
+    "pytest-asyncio>=0.21",
     "build>=1.0",
     "uvicorn[standard]>=0.30.0",
     "asgiref>=3.7.0",
+    "httpx[socks]>=0.27",
 ]
 
 [project.scripts]
@@ -85,6 +92,7 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q -m 'not integration'"
+asyncio_mode = "auto"
 markers = [
     "integration: end-to-end tests that spawn a real tor process and use the network (slow; opt-in via `pytest -m integration`)",
 ]

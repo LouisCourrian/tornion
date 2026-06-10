@@ -9,6 +9,7 @@ auto-routes traffic through Tor. Use it like you'd use `requests`.
 
 - [Module-level helpers](#module-level-helpers)
 - [Reusable Session](#reusable-session)
+- [Async client](#async-client)
 - [Authentication, headers, cookies](#authentication-headers-cookies)
 - [Smart tor reuse](#smart-tor-reuse)
 - [Timeouts & retries](#timeouts--retries)
@@ -58,6 +59,77 @@ with client.Session() as s:
 
 `client.Session` is a real subclass of `requests.Session` — anything that
 works with `requests.Session` works here.
+
+## Async client
+
+For high concurrency (100+ simultaneous `.onion` calls), use the async client.
+It's the `httpx.AsyncClient`-style counterpart of the sync `requests`-style
+API and routes through the **same** Tor process.
+
+It's an opt-in extra so the base client stays lightweight:
+
+```bash
+pip install tornion[async]
+```
+
+```python
+import asyncio
+from tornion import client
+
+async def main():
+    async with client.AsyncSession() as s:
+        r = await s.get("http://xxx.onion/ping")
+        r.raise_for_status()
+        print(r.json())
+
+        # Fan out — all share one Tor circuit and connection pool.
+        results = await asyncio.gather(
+            *(s.get(f"http://xxx.onion/item/{i}") for i in range(100))
+        )
+
+asyncio.run(main())
+```
+
+`client.AsyncSession` is a real subclass of `httpx.AsyncClient` — anything that
+works with `httpx.AsyncClient` works here (streaming, `auth`, `limits`, …). It
+takes the same tornion options as the sync `Session`:
+
+```python
+client.AsyncSession(
+    timeout=60,                  # default request timeout (s)
+    auto_install=True,           # download tor if missing
+    bootstrap_timeout=90,        # max wait for tor bootstrap (s)
+    retries=3,                   # retries on 502/503/504
+    use_existing=True,           # reuse running tor on :9050/:9150
+)
+```
+
+The constructor starts (or reuses) the shared tor process — a **blocking**
+operation the first time tor bootstraps. Inside an event loop, prefer the
+`create()` async constructor, which does that startup in a worker thread so
+the loop is never blocked:
+
+```python
+s = await client.AsyncSession.create(timeout=30)
+try:
+    r = await s.get("http://xxx.onion/ping")
+finally:
+    await s.aclose()
+```
+
+Module-level helpers mirror the sync ones, prefixed with `a`:
+
+```python
+from tornion import client
+
+r = await client.aget("http://xxx.onion/ping")
+await client.apost("http://xxx.onion/items", json={"name": "foo"})
+```
+
+Available: `aget`, `apost`, `aput`, `adelete`, `ahead`, `apatch`, `aoptions`,
+plus the generic `client.arequest(method, url, **kwargs)`. They share one
+internal `AsyncSession`. The bare module-level helpers don't close that session
+for you — for deterministic cleanup, prefer `async with client.AsyncSession()`.
 
 ### Session options
 
@@ -204,18 +276,19 @@ except tornion.OnionError:
    tor` saves the 20s bootstrap on every script invocation. `tornion`
    auto-detects it.
 
-3. **For massive parallelism, use httpx async.** `tornion.client` is sync
-   only. For 100+ concurrent .onion calls, fall back to:
+3. **For massive parallelism, use the async client.** For 100+ concurrent
+   `.onion` calls, reach for [`client.AsyncSession`](#async-client) instead of
+   the sync `Session` — it's `httpx.AsyncClient` over the same Tor proxy, with
+   tor management handled for you:
 
    ```python
-   import httpx, tornion
+   import asyncio
+   from tornion import client
 
-   port = tornion.detect_running_tor()  # or call client.Session() once
-   async with httpx.AsyncClient(
-       proxy=f"socks5h://127.0.0.1:{port}",
-       timeout=30,
-   ) as ac:
-       r = await ac.get("http://xxx.onion/")
+   async with client.AsyncSession(timeout=30) as s:
+       results = await asyncio.gather(
+           *(s.get("http://xxx.onion/") for _ in range(100))
+       )
    ```
 
-   (You'll still need `tor` running — `tornion` just gives you the proxy URL.)
+   Install it with `pip install tornion[async]`.

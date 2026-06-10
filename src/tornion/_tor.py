@@ -297,6 +297,16 @@ def shutdown() -> None:
         _sess._default_session = None
     except ImportError:
         pass
+    # Same for the async default session, if the async client was ever used.
+    # It may be bound to an already-closed event loop, so we just drop the
+    # reference (mirroring the sync path) rather than awaiting aclose().
+    try:
+        from .client import async_session as _async_sess
+        _async_sess._default_async_session = None
+        _async_sess._default_async_loop = None
+    except ImportError:
+        # httpx not installed → async client was never used. Nothing to clear.
+        pass
 
 
 # ---------------------------------------------------------------------------

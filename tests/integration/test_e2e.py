@@ -121,6 +121,45 @@ def test_publish_and_consume_round_trip(tmp_path):
 
 
 @pytest.mark.integration
+async def test_publish_and_consume_round_trip_async(tmp_path):
+    """Same round-trip as above, but via the async client.
+
+    Publishes an ASGI app on a .onion, then reaches it with
+    `client.AsyncSession`, exercising the httpx-based path end to end.
+    """
+    port = _free_port()
+    config = uvicorn.Config(
+        _ping_app, host="127.0.0.1", port=port, log_level="error",
+    )
+    uv = _ThreadedServer(config)
+    uv_thread = threading.Thread(target=uv.run, daemon=True)
+    uv_thread.start()
+
+    if not _wait_for_port("127.0.0.1", port, deadline_s=10):
+        uv.should_exit = True
+        pytest.fail("uvicorn did not start within 10s")
+
+    hs = server.HiddenService(
+        target_port=port,
+        key_dir=tmp_path / "hs-async",
+        bootstrap_timeout=180,
+    )
+
+    try:
+        onion_url = hs.start()
+        assert onion_url.endswith(".onion")
+
+        async with await client.AsyncSession.create(timeout=180) as s:
+            r = await s.get(f"{onion_url}/ping")
+            assert r.status_code == 200
+            assert r.json() == {"message": "pong"}
+    finally:
+        hs.stop()
+        uv.should_exit = True
+        uv_thread.join(timeout=5)
+
+
+@pytest.mark.integration
 def test_authorized_client_can_reach_restricted_hs(tmp_path):
     """End-to-end client-auth: only the holder of the matching private key
     can reach a hidden service that has authorized_clients configured.

@@ -78,6 +78,56 @@ _No changes yet._
 
 ---
 
+## [1.3.0] — 2026-06-10
+
+**Async client.** A `httpx.AsyncClient`-style counterpart to the sync
+`requests`-style client, for high-concurrency `.onion` workloads. Both
+clients share the same process-wide tor instance — using one does not
+spawn a second tor.
+
+### Added
+
+- **New module `tornion.client.async_session`**, re-exported lazily from
+  `tornion.client`:
+  - `AsyncOnionSession` (alias `AsyncSession`) — a real subclass of
+    `httpx.AsyncClient` that auto-routes through Tor over
+    `socks5h://`. Takes the same options as the sync `Session`
+    (`timeout`, `auto_install`, `bootstrap_timeout`, `retries`,
+    `use_existing`) plus any `httpx.AsyncClient` keyword argument.
+  - `AsyncOnionSession.create(**kwargs)` — async constructor that runs
+    the one-time tor bootstrap in a worker thread so it never blocks the
+    event loop.
+  - Module-level helpers `arequest`, `aget`, `apost`, `aput`, `adelete`,
+    `ahead`, `apatch`, `aoptions` — mirror the sync helpers, share one
+    internal `AsyncSession`, and rebuild it if the running event loop
+    changes (e.g. a second `asyncio.run()`).
+  - Status-based retries on transient `502`/`503`/`504` with exponential
+    backoff, matching the sync client (`httpx` itself only retries
+    connection failures).
+
+- **New optional extra `async`** (`pip install tornion[async]`) pulling
+  `httpx[socks]>=0.27`. `httpx` is imported lazily, so the base client
+  keeps requiring only `requests[socks]` and `stem`. Accessing an async
+  symbol without the extra raises a clear error pointing at
+  `pip install tornion[async]`.
+
+### Changed
+
+- `tornion.shutdown()` now also invalidates the module-level async
+  default session (in addition to the sync one), so subsequent
+  `tornion.client.aget(...)` calls build a fresh session against the next
+  tor's SOCKS port.
+
+### Tests
+
+- New `tests/test_async_client.py`: lazy exposure, the missing-`httpx`
+  error path, tor-option wiring, proxy precedence, the `create()`
+  classmethod, retry/backoff behavior on 502/503/504, and
+  `shutdown()` invalidation. `pytest-asyncio` added to the dev extra
+  (`asyncio_mode = "auto"`).
+
+---
+
 ## [1.2.0] — 2026-05-08
 
 **Tor v3 client authorization.** Hidden services can now restrict who

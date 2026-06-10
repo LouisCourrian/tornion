@@ -1,4 +1,12 @@
-"""HTTP client side: requests-style API that routes through Tor."""
+"""HTTP client side: requests-style API that routes through Tor.
+
+The sync client (``requests``-based) is always available. The async client
+(``httpx.AsyncClient``-based) is opt-in via ``pip install tornion[async]`` and
+is imported lazily — accessing ``AsyncSession``/``aget``/… below triggers the
+``httpx`` import on first use, so the base client stays lightweight.
+"""
+from typing import Any
+
 from .._client_auth import (
     add_client_auth,
     default_client_auth_dir,
@@ -39,3 +47,35 @@ __all__ = [
     "remove_client_auth",
     "default_client_auth_dir",
 ]
+
+# Async client symbols, resolved lazily so `httpx` is only required when the
+# async API is actually used. Deliberately NOT added to ``__all__`` — keeping
+# them out means ``from tornion.client import *`` never drags in httpx for
+# users who only need the sync client.
+_ASYNC_EXPORTS = frozenset({
+    "AsyncSession",
+    "AsyncOnionSession",
+    "arequest",
+    "aget",
+    "apost",
+    "aput",
+    "adelete",
+    "ahead",
+    "apatch",
+    "aoptions",
+})
+
+
+def __getattr__(name: str) -> Any:
+    # PEP 562 module-level __getattr__: only consulted for names not already
+    # defined above, so the sync API has zero overhead.
+    if name in _ASYNC_EXPORTS:
+        try:
+            from . import async_session
+        except ImportError as e:
+            raise ImportError(
+                f"tornion.client.{name} requires the async extra. "
+                "Install it with:  pip install tornion[async]"
+            ) from e
+        return getattr(async_session, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

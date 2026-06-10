@@ -33,6 +33,7 @@ SOCKS proxy or the hidden service, and tears it down on exit.
 ## ✨ Features
 
 - 🔌 **Drop-in `requests`** — `client.Session` is a real `requests.Session` subclass
+- ⚡ **Async too** — `client.AsyncSession` is a real `httpx.AsyncClient` subclass (opt-in)
 - 🚀 **Zero-config server** — `server.serve(app)` takes any ASGI **or** WSGI app
 - 🧠 **Smart tor reuse** — auto-detects an already-running tor on `:9050`/`:9150`
 - 📦 **Auto-install tor** — downloads the official Tor Expert Bundle on first use
@@ -45,6 +46,9 @@ SOCKS proxy or the hidden service, and tears it down on exit.
 ```bash
 # Client only
 pip install tornion
+
+# With the async client (httpx-based)
+pip install tornion[async]
 
 # With server features
 pip install tornion[server]
@@ -152,52 +156,6 @@ python examples/server_fastapi.py
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); see
 [CHANGELOG.md](CHANGELOG.md) for the full versioning policy and release
 history. Pin to a major version (`tornion>=1.0,<2.0`) and you're good.
-
-## 🗺️ Roadmap
-
-Required for `1.0.0` (✅ all shipped):
-
-- [x] **Stable `.onion` by default.** ~~Stop deriving `app_name` from
-      `app.title` (fragile).~~ `app_name` now defaults to the entry-script
-      basename (`python myserver.py` → `myserver`); `serve()` prints the
-      resolved `key_dir` and a fresh-vs-existing identity status before
-      tor bootstrap so the first run is never silent.
-- [x] **Verify Tor Expert Bundle downloads.** SHA-256 pinning. Hashes
-      live in `KNOWN_TOR_HASHES`, populated from the Tor Project's signed
-      `sha256sums-signed-build.txt`. Unknown versions are refused unless
-      the caller passes an explicit `sha256=...`. Mismatched archives are
-      deleted before extraction.
-- [x] **`CHANGELOG.md` + written SemVer policy.** See
-      [CHANGELOG.md](CHANGELOG.md) — Keep-a-Changelog format, with an
-      explicit policy at the top stating what counts as MAJOR / MINOR
-      / PATCH and the deprecation window.
-- [x] **Publish to PyPI.** Auto-release workflow at
-      [.github/workflows/release.yml](.github/workflows/release.yml):
-      on `v*.*.*` tag push, extracts the matching CHANGELOG section,
-      creates the GitHub Release with it as the body, then publishes
-      to PyPI via OIDC trusted publisher.
-
-Quick wins (shipped in 1.1.0):
-
-- [x] **`tornion keygen [--out DIR]`** — generates a fresh
-      `hs_ed25519_secret_key` without spinning up tor.
-- [x] **`tornion onion <key_dir>`** — prints the `.onion` address from
-      an existing key dir, fully offline (reads `hostname` or derives
-      from `hs_ed25519_public_key` via SHA3-256 + base32).
-- [x] **`TORNION_KEY_DIR`** env var, symmetric to `TORNION_TOR_PATH`.
-      Resolution order in `_resolve_key_dir`:
-      `explicit arg > $TORNION_KEY_DIR > <data>/hs/<app_name>/`.
-
-Shipped in 1.2.0:
-
-- [x] **Tor v3 client authorization** (restrict who can reach your HS).
-      Pure-Python x25519 (RFC 7748, vectors checked), server-side
-      `authorize` CLI, client-side `client-auth` CLI, full e2e
-      integration test. See the *Client authorization* section above.
-
-Deferred to 1.x:
-
-- [ ] Async client (`httpx.AsyncClient`-style) alongside the sync one.
 
 ## 📄 License
 
